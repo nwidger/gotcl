@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <21 Jul 2013 at 12:51:50 by nwidger on macros.local>
+// Time-stamp: <21 Jul 2013 at 12:55:20 by nwidger on macros.local>
 
 package main
 
@@ -383,18 +383,6 @@ func (interp *Interp) SkipWhiteSpace(script string) (remainder string) {
 
 	remainder = script[loc[1]:]
 	return
-}
-
-func (interp *Interp) wordListToArray(words *list.List) []string {
-	i := 0
-	swords := make([]string, words.Len())
-
-	for e := words.Front(); e != nil; e = e.Next() {
-		swords[i] = e.Value.(string)
-		i++
-	}
-
-	return swords
 }
 
 func (interp *Interp) Eval(script string) string {
