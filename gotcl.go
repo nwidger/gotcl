@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <17 Jul 2013 at 20:04:48 by nwidger on macros.local>
+// Time-stamp: <20 Jul 2013 at 21:04:52 by nwidger on macros.local>
 
 package main
 
@@ -13,21 +13,6 @@ import (
 	"strings"
 )
 
-// SCRIPT = COMMANDS
-//
-// COMMANDS = COMMANDS COMMAND CMD_SEP
-//          | COMMAND CMD_SEP
-//
-// COMMAND = WORDS
-//
-// WORDS = WORDS WORD
-//       | WORD
-//
-// WORD = " DQUOTE_WORD_CHARS "
-//      | { BRACE_WORD_CHARS }
-//      | {*} ARG_SUB_WORD_CHARS
-//      | WORD_CHARS
-
 var COMMAND_SEP regexp.Regexp = *regexp.MustCompile("[;\n]")
 
 var WORD_SEP regexp.Regexp = *regexp.MustCompile("[ \t\f]")
@@ -38,7 +23,8 @@ var NAME regexp.Regexp = *regexp.MustCompile("([a-zA-Z0-9_]|::)+")
 
 // var BACKSLASH_SUB regexp.Regexp = *regexp.MustCompile("\\([abfnrtv\\]|[0-9]{1-3}|(x([0-9a-fA-F])*)|(u([0-9a-fA-F]){1-4}))")
 
-type Word struct { }
+type Word string
+type Value string
 
 type Command struct {
 	name string
@@ -49,47 +35,184 @@ type Command struct {
 	native_body (func (*Interp, []string) string)
 }
 
-type Interp struct {
-	commands map[string]Command
-
+type Frame struct {
+	level int
+	vars map[string]*Value
 }
 
-func MakeInterp() Interp {
-	interp := Interp{ make(map[string]Command) }
-	interp.AddBuiltinCommands()
-	return interp
+type Stack struct {
+	level_list *list.List
+	level_map map[int]*Frame
 }
 
-func (interp *Interp) AddCommand(cmd Command) bool {
-	interp.commands[cmd.name] = cmd
+func NewFrame() *Frame {
+	return &Frame{ level: 0, vars: make(map[string]*Value) }
+}
+
+func (frame *Frame) GetValue(varName string) (ok bool, value *Value) {
+	value, ok = frame.vars[varName]
+	return
+}
+
+func (frame *Frame) SetValue(varName string, value *Value) (ok bool) {
+	frame.vars[varName] = value
 	return true
 }
 
+func (stack *Stack) PushFrame(frame *Frame) {
+	top := 0
+
+	if stack.level_list.Len() != 0 {
+		top = stack.level_list.Front().Value.(*Frame).level
+	}
+
+	frame.level = top+1
+	stack.level_map[frame.level] = frame
+	stack.level_list.PushFront(frame)
+}
+
+func (stack *Stack) GetFrame(level int) (frame *Frame, error error) {
+	frame, ok := stack.level_map[level]
+
+	if !ok {
+		return nil, errors.New("No frame at that level")
+	}
+
+	return frame, nil
+}
+
+func (stack *Stack) PeekFrame() *Frame {
+	if stack.level_list.Len() != 0 {
+		front := stack.level_list.Front()
+		frame := front.Value.(*Frame)
+		return frame
+	}
+
+	return nil
+}
+
+func (stack *Stack) PopFrame() {
+	if stack.level_list.Len() != 0 {
+		front := stack.level_list.Front()
+		frame := front.Value.(*Frame)
+		stack.level_map[frame.level] = nil
+		stack.level_list.Remove(front)
+	}
+}
+
+type Namespace struct {
+	name string
+	commands map[string]Command
+}
+
+func NewNamespace(name string) Namespace {
+	return Namespace{ name: name, commands: make(map[string]Command) }
+}
+
+func (ns *Namespace) AddCommand(cmd Command) bool {
+	ns.commands[cmd.name] = cmd
+	return true
+}
+
+func (ns *Namespace) FindCommand(name string, words *list.List) (cmd Command, error error) {
+	var ok bool
+
+	cmd, ok = ns.commands[name]; if !ok {
+		error = errors.New("invalid command name \"%s\"\n")
+		return
+	}
+
+	ok, error = cmd.ValidateArgs(words); if !ok {
+		return
+	}
+
+	return cmd, error
+}
+
+type Interp struct {
+	stack Stack
+	namespaces map[string]Namespace
+
+}
+
+func NewInterp() *Interp {
+	interp := &Interp{ Stack{ level_map: make(map[int]*Frame), level_list: list.New() }, make(map[string]Namespace) }
+	interp.namespaces["::"] = NewNamespace("::")
+	interp.AddBuiltinCommands()
+	interp.stack.PushFrame(NewFrame())
+	return interp
+}
+
+func (interp *Interp) AddCommand(ns_name string, cmd Command) bool {
+	ns, ok := interp.namespaces[ns_name]
+
+	if !ok {
+		fmt.Println("no such namespace", ns_name)
+		os.Exit(1)
+	}
+
+	return ns.AddCommand(cmd)
+}
+
 func (interp *Interp) AddBuiltinCommands() {
-	interp.AddCommand(Command{ "cd", 1, []string{ "dir" }, "", func (interp *Interp, args []string) string {
+	ns_name := "::"
+
+	interp.AddCommand(ns_name, Command{ "cd", 1, []string{ "dir" }, "", func (interp *Interp, args []string) string {
 		os.Chdir(args[0])
 		return ""
 	}})
 
-	interp.AddCommand(Command{ "eval", 1, []string{ "script" }, "", func (interp *Interp, args []string) string {
+	interp.AddCommand(ns_name, Command{ "eval", 1, []string{ "script" }, "", func (interp *Interp, args []string) string {
 		return interp.Eval(args[1])
 	}})
 
-	interp.AddCommand(Command{ "proc", 3, []string{ "name", "args", "body" }, "", func (interp *Interp, args []string) string {
-		fields := strings.Fields(args[1])
-		interp.AddCommand(Command{ args[0], len(fields), fields, args[2], nil })
+	interp.AddCommand(ns_name, Command{ "global", 1, []string{ "args" }, "", func (interp *Interp, args []string) string {
 		return ""
 	}})
 
-	interp.AddCommand(Command{ "puts", 1, []string{ "string" }, "", func (interp *Interp, args []string) string {
+	interp.AddCommand(ns_name, Command{ "proc", 3, []string{ "name", "args", "body" }, "", func (interp *Interp, args []string) string {
+		fields := strings.Fields(args[1])
+		interp.AddCommand(ns_name, Command{ args[0], len(fields), fields, args[2], nil })
+		return ""
+	}})
+
+	interp.AddCommand(ns_name, Command{ "puts", 1, []string{ "string" }, "", func (interp *Interp, args []string) string {
 		fmt.Println(args[0])
 		return ""
 	}})
 
-	interp.AddCommand(Command{ "pwd", 0, []string{ "" }, "", func (interp *Interp, args []string) string {
+	interp.AddCommand(ns_name, Command{ "pwd", 0, []string{ "" }, "", func (interp *Interp, args []string) string {
 		cwd, _ := os.Getwd()
 		return cwd
 	}})
+
+	interp.AddCommand(ns_name, Command{ "set", -1, []string{ "varName", "value" }, "", func (interp *Interp, args []string) string {
+		frame := interp.stack.PeekFrame()
+
+		varName := args[0]
+
+		if len(args) == 2 {
+			value := Value(args[1])
+			frame.SetValue(varName, &value)
+			return string(value)
+		}
+
+		ok, value := frame.GetValue(varName)
+
+		if !ok {
+			fmt.Printf("can't read \"%s\": no such variable\n", varName)
+			os.Exit(1)
+		}
+
+		return string(*value)
+	}})
+}
+
+func (cmd *Command) BadArgsMessage() string {
+	var err = fmt.Sprintf("wrong # args: should be \"%v", cmd.name)
+	for _, arg := range cmd.args { err += fmt.Sprintf(" %v", arg) }
+	err += "\""
+	return err
 }
 
 func (cmd *Command) ValidateArgs(words *list.List) (ok bool, err error) {
@@ -104,11 +227,18 @@ func (cmd *Command) ValidateArgs(words *list.List) (ok bool, err error) {
 	return
 }
 
-func (cmd *Command) BadArgsMessage() string {
-	var err = fmt.Sprintf("wrong # args: should be \"%v", cmd.name)
-	for _, arg := range cmd.args { err += fmt.Sprintf(" %v", arg) }
-	err += "\""
-	return err
+func (interp *Interp) FindCommand(name string, words *list.List) (cmd Command, error error) {
+	ns := interp.namespaces["::"]
+
+	cmd, error = ns.FindCommand(name, words); if error != nil {
+		return
+	}
+
+	ok, error := cmd.ValidateArgs(words); if !ok {
+		return
+	}
+
+	return cmd, error
 }
 
 func (interp *Interp) ParseDoubleQuoteWord(script string) (ok bool, word string, remainder string) {
@@ -142,6 +272,8 @@ func (interp *Interp) ParseBraceWord(script string) (ok bool, word string, remai
 }
 
 func (interp *Interp) ParseWord(script string) (ok bool, word string, remainder string) {
+	script = interp.SkipWhiteSpace(script)
+
 	ok, word, remainder = interp.ParseDoubleQuoteWord(script); if ok {
 		return
 	}
@@ -164,6 +296,28 @@ func (interp *Interp) ParseWord(script string) (ok bool, word string, remainder 
 	return
 }
 
+func (interp *Interp) ParseWords(script string) (ok bool, words *list.List, remainder string) {
+	var word string
+
+	remainder = script
+	words = list.New()
+
+	for len(remainder) != 0 {
+		ok, word, remainder = interp.ParseWord(remainder); if !ok {
+			fmt.Printf("error parsing next word from script \"%s\"\n", remainder)
+			os.Exit(1)
+		}
+
+		words.PushBack(word)
+
+		if len(remainder) > 0 && (string(remainder[0]) == "\n" || string(remainder[0]) == ";") {
+			break
+		}
+	}
+
+	return true, words, remainder
+}
+
 func (interp *Interp) SkipWhiteSpace(script string) (remainder string) {
 	remainder = script
 
@@ -177,61 +331,51 @@ func (interp *Interp) SkipWhiteSpace(script string) (remainder string) {
 
 func (interp *Interp) Eval(script string) string {
 	var ok bool
-	var word string
+	var words *list.List
+	var error error
+	var cmd Command
 
 	retval := ""
-	script = interp.SkipWhiteSpace(script)
 
 	for len(script) != 0 {
-		words := list.New()
+		ok, words, script = interp.ParseWords(script)
 
-		for len(script) != 0 {
-			if (string(script[0]) == "\n" || string(script[0]) == ";") {
-				script = script[1:]
-				script = interp.SkipWhiteSpace(script)
-				break
+		if !ok {
+
+		}
+
+		if len(script) > 0 && (string(script[0]) == "\n" || string(script[0]) == ";") {
+			script = script[1:]
+
+			if words.Len() == 0 {
+				continue
 			}
-			
-			ok, word, script = interp.ParseWord(script); if !ok {
-				fmt.Printf("error parsing next word from script \"%s\"\n", script)
+
+			name := words.Remove(words.Front()).(string)
+			cmd, error = interp.FindCommand(name, words)
+
+			if error != nil {
+				fmt.Println(error)
 				os.Exit(1)
 			}
 
-			words.PushBack(word)
-			script = interp.SkipWhiteSpace(script)
-		}
+			// TODO: bind arguments to stack level
 
-		if words.Len() == 0 {
-			continue
-		}
+			if cmd.native_body == nil {
+				retval = interp.Eval(cmd.body)
+			} else {
+				i := 0
+				swords := make([]string, words.Len())
 
-		name := words.Remove(words.Front()).(string)
-		cmd, ok := interp.commands[name]; if !ok {
-			fmt.Printf("invalid command name \"%s\"\n", name)
-			os.Exit(1)
-		}
+				for e := words.Front(); e != nil; e = e.Next() {
+					swords[i] = e.Value.(string)
+					i++
+				}
 
-		// TODO: bind arguments to stack level
-		ok, error := cmd.ValidateArgs(words); if !ok {
-			fmt.Println(error)
-			os.Exit(1)
-		}
-
-		if cmd.native_body == nil {
-			retval = interp.Eval(cmd.body)
-		} else {
-			i := 0
-			swords := make([]string, words.Len())
-
-			for e := words.Front(); e != nil; e = e.Next() {
-				swords[i] = e.Value.(string)
-				i++
+				retval = cmd.native_body(interp, swords)
 			}
 
-			retval = cmd.native_body(interp, swords)
 		}
-
-		script = interp.SkipWhiteSpace(script)
 	}
 
 	return retval
@@ -255,6 +399,6 @@ func main() {
 	}
 
 	script := string(bytes)
-	interp := MakeInterp()
+	interp := NewInterp()
 	interp.Eval(script)
 }
