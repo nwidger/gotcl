@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <21 Jul 2013 at 12:55:20 by nwidger on macros.local>
+// Time-stamp: <21 Jul 2013 at 18:53:51 by nwidger on macros.local>
 
 package main
 
@@ -119,11 +119,22 @@ func (stack *Stack) PopFrame() {
 
 type Namespace struct {
 	name string
+	vars map[string]Value
 	commands map[string]Command
 }
 
 func NewNamespace(name string) Namespace {
-	return Namespace{ name: name, commands: make(map[string]Command) }
+	return Namespace{ name: name, vars: make(map[string]Value), commands: make(map[string]Command) }
+}
+
+func (namespace *Namespace) GetValue(varName string) (value Value, ok bool) {
+	value, ok = namespace.vars[varName]
+	return
+}
+
+func (namespace *Namespace) SetValue(varName string, value Value) (ok bool) {
+	namespace.vars[varName] = value
+	return true
 }
 
 func (ns *Namespace) AddCommand(cmd Command) bool {
@@ -197,7 +208,7 @@ func (interp *Interp) AddCommand(ns_name string, cmd Command) bool {
 	ns, ok := interp.namespaces[ns_name]
 
 	if !ok {
-		fmt.Println("no such namespace", ns_name)
+		fmt.Printf("can't create procedure \"%v\": unknown namespace\n", cmd.name)
 		os.Exit(1)
 	}
 
@@ -359,7 +370,7 @@ func (interp *Interp) ParseWords(script string) (ok bool, words *list.List, rema
 	words = list.New()
 
 	for len(remainder) != 0 {
-		if string(remainder[0]) == "\n" || string(remainder[0]) == ";" {
+		if remainder[0] == '\n' || remainder[0] == ';' {
 			break
 		}
 
@@ -374,6 +385,24 @@ func (interp *Interp) ParseWords(script string) (ok bool, words *list.List, rema
 	return true, words, remainder
 }
 
+func (interp *Interp) ParseComment(script string) (ok bool, comment string, remainder string) {
+	script = interp.SkipWhiteSpace(script)
+
+	ok = false
+	comment = ""
+	remainder = script
+
+	loc := regexp.MustCompile("^#[^\n]*\n").FindStringIndex(script); if loc == nil {
+		return
+	}
+
+	ok = true
+	comment = script[loc[0]:loc[1]]
+	remainder = script[loc[1]:]
+
+	return
+}
+
 func (interp *Interp) SkipWhiteSpace(script string) (remainder string) {
 	remainder = script
 
@@ -386,6 +415,7 @@ func (interp *Interp) SkipWhiteSpace(script string) (remainder string) {
 }
 
 func (interp *Interp) Eval(script string) string {
+	var ok bool
 	var error error
 	var cmd Command
 	var words *list.List
@@ -393,9 +423,13 @@ func (interp *Interp) Eval(script string) string {
 	retval := ""
 
 	for len(script) != 0 {
+		ok, _, script = interp.ParseComment(script); if ok {
+			continue
+		}
+
 		_, words, script = interp.ParseWords(script)
 
-		if len(script) > 0 && (string(script[0]) == "\n" || string(script[0]) == ";") {
+		if len(script) > 0 && (script[0] == '\n' || script[0] == ';') {
 			script = script[1:]
 
 			if words.Len() == 0 {
