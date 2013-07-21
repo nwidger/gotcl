@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <21 Jul 2013 at 08:44:16 by nwidger on macros.local>
+// Time-stamp: <21 Jul 2013 at 12:51:50 by nwidger on macros.local>
 
 package main
 
@@ -13,8 +13,17 @@ import (
 	"strings"
 )
 
+// WORD
+
 type Word string
+
+// VALUE
+
 type Value string
+
+func (value Value) String() string {
+	return string(value)
+}
 
 // FRAME
 
@@ -27,7 +36,7 @@ func NewFrame() *Frame {
 	return &Frame{ level: 0, vars: make(map[string]Value) }
 }
 
-func (frame *Frame) GetValue(varName string) (ok bool, value Value) {
+func (frame *Frame) GetValue(varName string) (value Value, ok bool) {
 	value, ok = frame.vars[varName]
 	return
 }
@@ -45,6 +54,16 @@ func (frame *Frame) GetParentLevel() int {
 	return frame.level - 1
 }
 
+func (frame *Frame) BindArguments(cmd Command, words *list.List) bool {
+	i := 0
+	for e := words.Front(); e != nil; e = e.Next() {
+		frame.SetValue(cmd.args[i], Value(e.Value.(string)))
+		i++
+	}
+
+	return true
+}
+
 // STACK
 
 type Stack struct {
@@ -52,7 +71,8 @@ type Stack struct {
 	level_map map[int]*Frame
 }
 
-func (stack *Stack) PushFrame(frame *Frame) {
+func (stack *Stack) PushFrame() *Frame {
+	frame := NewFrame()
 	top := 0
 
 	if stack.level_list.Len() != 0 {
@@ -62,6 +82,8 @@ func (stack *Stack) PushFrame(frame *Frame) {
 	frame.level = top+1
 	stack.level_map[frame.level] = frame
 	stack.level_list.PushFront(frame)
+
+	return frame
 }
 
 func (stack *Stack) GetFrame(level int) (frame *Frame, error error) {
@@ -113,7 +135,8 @@ func (ns *Namespace) FindCommand(name string, words *list.List) (cmd Command, er
 	var ok bool
 
 	cmd, ok = ns.commands[name]; if !ok {
-		error = errors.New("invalid command name \"%s\"\n")
+		msg := fmt.Sprintf("invalid command name \"%s\"\n", name)
+		error = errors.New(msg)
 		return
 	}
 
@@ -132,7 +155,7 @@ type Command struct {
 	args []string
 
 	body string
-	native_body (func (*Interp, []string) string)
+	native_body (func (*Interp) string)
 }
 
 func (cmd *Command) BadArgsMessage() string {
@@ -166,6 +189,7 @@ func NewInterp() *Interp {
 	interp := &Interp{ Stack{ level_map: make(map[int]*Frame), level_list: list.New() }, make(map[string]Namespace) }
 	interp.namespaces["::"] = NewNamespace("::")
 	interp.AddBuiltinCommands()
+	interp.stack.PushFrame()
 	return interp
 }
 
@@ -183,40 +207,55 @@ func (interp *Interp) AddCommand(ns_name string, cmd Command) bool {
 func (interp *Interp) AddBuiltinCommands() {
 	ns_name := "::"
 
-	interp.AddCommand(ns_name, Command{ "cd", 1, []string{ "dir" }, "", func (interp *Interp, args []string) string {
-		os.Chdir(args[0])
+	interp.AddCommand(ns_name, Command{ "cd", 1, []string{ "dir" }, "", func (interp *Interp) string {
+		frame := interp.stack.PeekFrame()
+		dir, _ := frame.GetValue("dir")
+		os.Chdir(string(dir))
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "eval", 1, []string{ "script" }, "", func (interp *Interp, args []string) string {
-		return interp.Eval(args[1])
+	interp.AddCommand(ns_name, Command{ "eval", 1, []string{ "script" }, "", func (interp *Interp) string {
+		frame := interp.stack.PeekFrame()
+		script, _ := frame.GetValue("script")
+		return interp.Eval(string(script))
 	}})
 
-	interp.AddCommand(ns_name, Command{ "global", 1, []string{ "args" }, "", func (interp *Interp, args []string) string {
+	interp.AddCommand(ns_name, Command{ "global", 1, []string{ "args" }, "", func (interp *Interp) string {
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "proc", 3, []string{ "name", "args", "body" }, "", func (interp *Interp, args []string) string {
-		fields := strings.Fields(args[1])
-		interp.AddCommand(ns_name, Command{ args[0], len(fields), fields, args[2], nil })
+	interp.AddCommand(ns_name, Command{ "proc", 3, []string{ "name", "args", "body" }, "", func (interp *Interp) string {
+		frame := interp.stack.PeekFrame()
+
+		name, _ := frame.GetValue("name")
+		args, _ := frame.GetValue("args")
+		body, _ := frame.GetValue("body")
+
+		fields := strings.Fields(string(args))
+		interp.AddCommand(ns_name, Command{ string(name), len(fields), fields, string(body), nil })
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "puts", 1, []string{ "string" }, "", func (interp *Interp, args []string) string {
-		fmt.Println(args[0])
+	interp.AddCommand(ns_name, Command{ "puts", 1, []string{ "string" }, "", func (interp *Interp) string {
+		frame := interp.stack.PeekFrame()
+		str, _ := frame.GetValue("string")
+		fmt.Println(string(str))
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "pwd", 0, []string{ "" }, "", func (interp *Interp, args []string) string {
+	interp.AddCommand(ns_name, Command{ "pwd", 0, []string{ "" }, "", func (interp *Interp) string {
 		cwd, _ := os.Getwd()
 		return cwd
 	}})
 
-	interp.AddCommand(ns_name, Command{ "set", -1, []string{ "varName", "value" }, "", func (interp *Interp, args []string) string {
+	interp.AddCommand(ns_name, Command{ "set", -1, []string{ "varName", "value" }, "", func (interp *Interp) string {
 		var ok bool
 		var value Value
 
-		varName := args[0]
+		frame := interp.stack.PeekFrame()
+		varName, _ := frame.GetValue("varName")
+		value, _ = frame.GetValue("value")
+
 		level := interp.stack.PeekFrame().GetParentLevel()
 		frame, error := interp.stack.GetFrame(level)
 
@@ -225,11 +264,10 @@ func (interp *Interp) AddBuiltinCommands() {
 			os.Exit(1)
 		}
 
-		if len(args) == 2 {
-			value = Value(args[1])
-			frame.SetValue(varName, value)
+		if string(value) != "" {
+			frame.SetValue(string(varName), value)
 		} else {
-			ok, value = frame.GetValue(varName)
+			value, ok = frame.GetValue(string(varName))
 
 			if !ok {
 				fmt.Printf("can't read \"%s\": no such variable\n", varName)
@@ -360,12 +398,11 @@ func (interp *Interp) wordListToArray(words *list.List) []string {
 }
 
 func (interp *Interp) Eval(script string) string {
-	var words *list.List
 	var error error
 	var cmd Command
+	var words *list.List
 
 	retval := ""
-	interp.stack.PushFrame(NewFrame())
 
 	for len(script) != 0 {
 		_, words, script = interp.ParseWords(script)
@@ -385,20 +422,18 @@ func (interp *Interp) Eval(script string) string {
 				os.Exit(1)
 			}
 
-			// TODO: bind arguments to stack level
+			frame := interp.stack.PushFrame()
+			frame.BindArguments(cmd, words)
 
 			if cmd.native_body == nil {
 				retval = interp.Eval(cmd.body)
 			} else {
-				interp.stack.PushFrame(NewFrame())
-				retval = cmd.native_body(interp, interp.wordListToArray(words))
-				interp.stack.PopFrame()
+				retval = cmd.native_body(interp)
 			}
 
+			interp.stack.PopFrame()
 		}
 	}
-
-	interp.stack.PopFrame()
 
 	return retval
 }
