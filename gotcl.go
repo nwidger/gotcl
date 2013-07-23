@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <21 Jul 2013 at 18:53:51 by nwidger on macros.local>
+// Time-stamp: <22 Jul 2013 at 21:00:23 by nwidger on macros.local>
 
 package main
 
@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
-	"strings"
 )
 
 // WORD
@@ -55,10 +54,13 @@ func (frame *Frame) GetParentLevel() int {
 }
 
 func (frame *Frame) BindArguments(cmd Command, words *list.List) bool {
-	i := 0
-	for e := words.Front(); e != nil; e = e.Next() {
-		frame.SetValue(cmd.args[i], Value(e.Value.(string)))
-		i++
+	for _, arg := range cmd.args {
+		name := arg.GetName()
+		value := arg.GetValue()
+		// fmt.Printf("111 %v: name ->%v<-, value ->%v<-\n", cmd.name, name, value)
+		if words.Len() != 0 { value = words.Remove(words.Front()).(string) }
+		// fmt.Printf("222 %v: name ->%v<-, value ->%v<-\n", cmd.name, name, value)
+		frame.SetValue(name, Value(value))
 	}
 
 	return true
@@ -158,12 +160,48 @@ func (ns *Namespace) FindCommand(name string, words *list.List) (cmd Command, er
 	return cmd, error
 }
 
+// ARG
+
+type Arg struct {
+	name string
+	has_default_value bool
+	value string
+}
+
+func NewArg(name string) Arg {
+	return Arg{ name: name, has_default_value: false, value: "" }
+}
+
+func NewArgDefault(name string, value string) Arg {
+	return Arg{ name: name, has_default_value: true, value: value }
+}
+
+func (arg *Arg) HasDefaultValue() bool {
+	return arg.has_default_value
+}
+
+func (arg *Arg) GetName() string {
+	return arg.name
+}
+
+func (arg *Arg) GetValue() string {
+	return arg.value
+}
+
+func (arg *Arg) String() string {
+	str := fmt.Sprintf("[ name: ->%v<-\n", arg.name)
+	str += fmt.Sprintf("has_default_value: ->%v<-\n", arg.has_default_value)
+	str += fmt.Sprintf("value: ->%v<- ]\n", arg.value)
+	return str
+}
+
 // COMMAND
 
 type Command struct {
 	name string
 	num_args int
-	args []string
+	min_args int
+	args []Arg
 
 	body string
 	native_body (func (*Interp) string)
@@ -171,8 +209,16 @@ type Command struct {
 
 func (cmd *Command) BadArgsMessage() string {
 	var err = fmt.Sprintf("wrong # args: should be \"%v", cmd.name)
-	for _, arg := range cmd.args { err += fmt.Sprintf(" %v", arg) }
+
+	for _, arg := range cmd.args {
+		err += " "
+		if arg.HasDefaultValue() { err += "?" }
+		err += fmt.Sprintf("%v", arg.name)
+		if arg.HasDefaultValue() { err += "?" }
+	}
+
 	err += "\""
+
 	return err
 }
 
@@ -180,12 +226,23 @@ func (cmd *Command) ValidateArgs(words *list.List) (ok bool, err error) {
 	ok = true
 	err = nil
 
-	if cmd.num_args != -1 && cmd.num_args != words.Len() {
+	if words.Len() < cmd.min_args || words.Len() > cmd.num_args  {
 		ok = false
 		err = errors.New(cmd.BadArgsMessage())
 	}
 
 	return
+}
+
+func (cmd *Command) String() string {
+	str := fmt.Sprintf("name: ->%v<-\n", cmd.name)
+	str += fmt.Sprintf("num_args: ->%v<-\n", cmd.num_args)
+	str += fmt.Sprintf("min_args: ->%v<-\n", cmd.min_args)
+	for i, arg := range cmd.args {
+		str += fmt.Sprintf("arg[%v]: ->%v<-\n", i, arg.String())
+	}
+	str += fmt.Sprintf("body: ->%v<-\n", cmd.body)
+	return str
 }
 
 // INTERP
@@ -212,62 +269,94 @@ func (interp *Interp) AddCommand(ns_name string, cmd Command) bool {
 		os.Exit(1)
 	}
 
+	// fmt.Println("adding command", cmd.String())
+
 	return ns.AddCommand(cmd)
 }
 
 func (interp *Interp) AddBuiltinCommands() {
 	ns_name := "::"
 
-	interp.AddCommand(ns_name, Command{ "cd", 1, []string{ "dir" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "cd", 1, 1, []Arg{ NewArg("dir") }, "", func (interp *Interp) string {
 		frame := interp.stack.PeekFrame()
 		dir, _ := frame.GetValue("dir")
 		os.Chdir(string(dir))
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "eval", 1, []string{ "script" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "eval", 1, 1, []Arg{ NewArg("script") }, "", func (interp *Interp) string {
 		frame := interp.stack.PeekFrame()
 		script, _ := frame.GetValue("script")
 		return interp.Eval(string(script))
 	}})
 
-	interp.AddCommand(ns_name, Command{ "global", 1, []string{ "args" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "global", 1, 1, []Arg{ NewArg("args") }, "", func (interp *Interp) string {
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "proc", 3, []string{ "name", "args", "body" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "if", 1, 1, []Arg{ NewArg("args") }, "", func (interp *Interp) string {
+		// frame := interp.stack.PeekFrame()
+		// args, _ := frame.GetValue("args")
+		return ""
+	}})
+
+	interp.AddCommand(ns_name, Command{ "proc", 3, 3, []Arg{ NewArg("name"), NewArg("args"), NewArg("body") }, "", func (interp *Interp) string {
 		frame := interp.stack.PeekFrame()
 
 		name, _ := frame.GetValue("name")
 		args, _ := frame.GetValue("args")
 		body, _ := frame.GetValue("body")
 
-		fields := strings.Fields(string(args))
-		interp.AddCommand(ns_name, Command{ string(name), len(fields), fields, string(body), nil })
+		_, words, _ := interp.ParseWords(args.String())
+
+		num_args := words.Len()
+		min_args := num_args
+
+		s_args := make([]Arg, num_args)
+
+		i := 0
+		for e := words.Front(); e != nil; e = e.Next() {
+			_, arg_words, _ := interp.ParseWords(e.Value.(string))
+			arg_name := arg_words.Remove(arg_words.Front()).(string)
+
+			if arg_words.Len() == 0 {
+				s_args[i] = NewArg(arg_name)
+			} else {
+				arg_value := arg_words.Remove(arg_words.Front()).(string)
+				s_args[i] = NewArgDefault(arg_name, arg_value)
+				if min_args == num_args { min_args = i }
+			}
+
+			i++
+		}
+
+		interp.AddCommand(ns_name, Command{ name.String(), num_args, min_args, s_args, body.String(), nil })
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "puts", 1, []string{ "string" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "puts", 1, 1, []Arg{ NewArg("string") }, "", func (interp *Interp) string {
 		frame := interp.stack.PeekFrame()
 		str, _ := frame.GetValue("string")
 		fmt.Println(string(str))
 		return ""
 	}})
 
-	interp.AddCommand(ns_name, Command{ "pwd", 0, []string{ "" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "pwd", 0, 0, []Arg{ }, "", func (interp *Interp) string {
 		cwd, _ := os.Getwd()
 		return cwd
 	}})
 
-	interp.AddCommand(ns_name, Command{ "set", -1, []string{ "varName", "value" }, "", func (interp *Interp) string {
+	interp.AddCommand(ns_name, Command{ "set", 2, 1, []Arg{ NewArg("varName"), NewArgDefault("newValue", "") }, "", func (interp *Interp) string {
 		var ok bool
 		var value Value
 
 		frame := interp.stack.PeekFrame()
 		varName, _ := frame.GetValue("varName")
-		value, _ = frame.GetValue("value")
+		value, _ = frame.GetValue("newValue")
 
-		level := interp.stack.PeekFrame().GetParentLevel()
+		// fmt.Printf("in set, varName = ->%v<-, value = ->%v<-\n", varName, value)
+
+		level := frame.GetParentLevel()
 		frame, error := interp.stack.GetFrame(level)
 
 		if error != nil {
@@ -327,7 +416,8 @@ func (interp *Interp) ParseBraceWord(script string) (ok bool, word string, remai
 	ok = false
 	remainder = script
 
-	loc := regexp.MustCompile("^{([^}])*}").FindStringIndex(script); if loc == nil {
+	// loc := regexp.MustCompile("^{([^}])*}").FindStringIndex(script); if loc == nil {
+	loc := regexp.MustCompile("^{(({[^}]*})|[^}])*}").FindStringIndex(script); if loc == nil {
 		return
 	}
 
