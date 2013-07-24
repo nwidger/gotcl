@@ -11,10 +11,9 @@ func TestParseBraceWord(t *testing.T) {
 	var remainder string
 
 	n := 0
-	interp := NewInterp()
 
 	script = "not a brace word"
-	ok, word, remainder = interp.ParseBraceWord(script)
+	ok, word, remainder = InterpParseBraceWord(script)
 
 	t.Logf("script = ->%v<-, ok = %v, word = ->%v<-, remainder = ->%v<-\n", script, ok, word, remainder)
 
@@ -36,7 +35,7 @@ func TestParseBraceWord(t *testing.T) {
 	n++
 
 	script = " { i am a brace word }"
-	ok, word, remainder = interp.ParseBraceWord(script)
+	ok, word, remainder = InterpParseBraceWord(script)
 
 	t.Logf("script = ->%v<-, ok = %v, word = ->%v<-, remainder = ->%v<-\n", script, ok, word, remainder)
 
@@ -58,7 +57,7 @@ func TestParseBraceWord(t *testing.T) {
 	n++
 
 	script = "{ arg1 { arg2 default } }"
-	ok, word, remainder = interp.ParseBraceWord(script)
+	ok, word, remainder = InterpParseBraceWord(script)
 
 	t.Logf("script = ->%v<-, ok = %v, word = ->%v<-, remainder = ->%v<-\n", script, ok, word, remainder)
 
