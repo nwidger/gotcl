@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <23 Jul 2013 at 19:10:34 by nwidger on macros.local>
+// Time-stamp: <23 Jul 2013 at 20:32:52 by nwidger on macros.local>
 
 package main
 
@@ -38,12 +38,6 @@ func (value Value) Int() int {
 	}
 
 	return i
-}
-
-func (value Value) List() *list.List {
-	
-
-	return list
 }
 
 func StringToValue(str string) Value {
@@ -120,11 +114,11 @@ func (frame *Frame) Eval(interp *Interp, script string) string {
 	retval := ""
 
 	for len(script) != 0 {
-		ok, _, script = interp.ParseComment(script); if ok {
+		ok, _, script = InterpParseComment(script); if ok {
 			continue
 		}
 
-		_, words, script = interp.ParseWords(script)
+		_, words, script = InterpParseWords(script)
 
 		if len(script) == 0 || script[0] == '\n' || script[0] == ';' {
 			if len(script) != 0 {
@@ -390,7 +384,7 @@ func (interp *Interp) AddBuiltinCommands() {
 		args, _ := frame.GetValue("args")
 		body, _ := frame.GetValue("body")
 
-		_, words, _ := interp.ParseWords(args.String())
+		_, words, _ := InterpParseWords(args.String())
 
 		num_args := words.Len()
 		min_args := num_args
@@ -399,7 +393,7 @@ func (interp *Interp) AddBuiltinCommands() {
 
 		i := 0
 		for e := words.Front(); e != nil; e = e.Next() {
-			_, arg_words, _ := interp.ParseWords(e.Value.(string))
+			_, arg_words, _ := InterpParseWords(e.Value.(string))
 			arg_name := arg_words.Remove(arg_words.Front()).(string)
 
 			if arg_words.Len() == 0 {
