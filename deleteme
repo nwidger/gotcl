@@ -1,0 +1,10 @@
+proc test { arg1 { arg2 arg2default } } {
+    puts "i am in test, arg1 = $arg1, arg2 = $arg2"
+}
+
+puts "setting x"
+set x hello
+puts "printing x"
+puts "so i heard that x = $x and x = $x [ pwd ] yup"
+test "hi"
+test "hi" goodbye
