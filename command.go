@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <30 Jul 2013 at 18:26:19 by nwidger on macros.local>
+// Time-stamp: <01 Aug 2013 at 19:43:37 by nwidger on macros.local>
 
 package gotcl
 
@@ -42,7 +42,7 @@ func (cmd *Command) ValidateArgs(words *list.List) (ok bool, err error) {
 	ok = true
 	err = nil
 
-	if words.Len() < cmd.min_args || words.Len() > cmd.num_args {
+	if words.Len() < cmd.min_args || (cmd.num_args != -1 && words.Len() > cmd.num_args) {
 		ok = false
 		err = errors.New(cmd.BadArgsMessage())
 	}

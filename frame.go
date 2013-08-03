@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <30 Jul 2013 at 18:24:49 by nwidger on macros.local>
+// Time-stamp: <02 Aug 2013 at 21:21:36 by nwidger on macros.local>
 
 package gotcl
 
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 )
 
 type Frame struct {
@@ -38,13 +39,26 @@ func (frame *Frame) GetParentLevel() int {
 }
 
 func (frame *Frame) BindArguments(cmd Command, words *list.List) bool {
-	for _, arg := range cmd.args {
+	len := len(cmd.args)
+
+	for i, arg := range cmd.args {
 		name := arg.GetName()
 		value := arg.GetValue()
 
-		if words.Len() != 0 {
-			word := Value(words.Remove(words.Front()).(Word).String())
-			value = &word
+		if i == (len-1) && name == "args" {
+			tmp := []string{}
+
+			for words.Len() != 0 {
+				word := words.Remove(words.Front()).(Word).String()
+				tmp = append(tmp, word)
+			}
+
+			value = StringToValueP(strings.Join(tmp, " "))
+		} else {
+			if words.Len() != 0 {
+				word := Value(words.Remove(words.Front()).(Word).String())
+				value = &word
+			}
 		}
 
 		frame.SetValue(name, value)
@@ -97,9 +111,6 @@ func (frame *Frame) SubstituteVariable(interp *Interp, word Word) (ok bool, neww
 }
 
 func (frame *Frame) Substitute(interp *Interp, word Word) Word {
-	var ok bool
-	var part Word
-
 	switch word.(type) {
 	case BraceWord:
 		return word
@@ -108,20 +119,19 @@ func (frame *Frame) Substitute(interp *Interp, word Word) Word {
 	newword := LiteralWord("")
 
 	for len(word.String()) != 0 {
-		ok, part, word = frame.SubstituteCommand(interp, word)
-		if ok {
-			newword = LiteralWord(newword.String() + part.String())
-			continue
-		}
+		cmd_ok, cmd_part, cmd_word := frame.SubstituteCommand(interp, word)
+		var_ok, var_part, var_word := frame.SubstituteVariable(interp, word)
 
-		ok, part, word = frame.SubstituteVariable(interp, word)
-		if ok {
-			newword = LiteralWord(newword.String() + part.String())
-			continue
+		if cmd_ok && (!var_ok || cmd_word.Len() >= var_word.Len()) {
+			newword = LiteralWord(newword.String() + cmd_part.String())
+			word = cmd_word
+		} else if var_ok && (!cmd_ok || var_word.Len() >= cmd_word.Len()) {
+			newword = LiteralWord(newword.String() + var_part.String())
+			word = var_word
+		} else {
+			newword = LiteralWord(newword.String() + word.String())
+			word = LiteralWord("")
 		}
-
-		newword = LiteralWord(newword.String() + word.String())
-		word = LiteralWord("")
 	}
 
 	return newword

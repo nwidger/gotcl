@@ -1,5 +1,5 @@
 // Niels Widger
-// Time-stamp: <30 Jul 2013 at 18:31:00 by nwidger on macros.local>
+// Time-stamp: <02 Aug 2013 at 21:03:18 by nwidger on macros.local>
 
 package gotcl
 
@@ -21,13 +21,49 @@ func NewInterp() *Interp {
 	return interp
 }
 
-func (interp *Interp) AddCommand(ns_name string, cmd Command) bool {
+func (interp *Interp) AddBuiltinCommand(ns_name string, name string, args string, body func(*Interp, *Frame) string) bool {
+	return interp.AddCommand_Aux(ns_name, name, args, "", body)
+}
+
+func (interp *Interp) AddCommand(ns_name string, name string, args string, body string) bool {
+	return interp.AddCommand_Aux(ns_name, name, args, body, nil)
+}
+
+func (interp *Interp) AddCommand_Aux(ns_name string, name string, args string, body string, native_body func(*Interp, *Frame) string) bool {
 	ns, ok := interp.namespaces[ns_name]
 
 	if !ok {
-		fmt.Printf("can't create procedure \"%v\": unknown namespace\n", cmd.name)
+		fmt.Printf("can't create procedure \"%v::%v\": unknown namespace\n", ns_name, name)
 		os.Exit(1)
 	}
+
+	_, words, _ := ParseWords(args)
+
+	num_args := words.Len()
+	min_args := num_args
+
+	s_args := make([]Arg, num_args)
+
+	for i, e := 0, words.Front(); e != nil; i, e = i+1, e.Next() {
+		_, arg_words, _ := ParseWords(e.Value.(Word).String())
+		arg_name := arg_words.Remove(arg_words.Front()).(Word).String()
+
+		if arg_words.Len() == 0 {
+			s_args[i] = NewArg(arg_name)
+		} else {
+			arg_value := Value(arg_words.Remove(arg_words.Front()).(Word).String())
+			s_args[i] = NewArgDefault(arg_name, &arg_value)
+			if min_args == num_args {
+				min_args = i
+			}
+		}
+
+		if e.Next() == nil && arg_name == "args" {
+			num_args = -1
+		}
+	}
+
+	cmd := Command{name, num_args, min_args, s_args, body, native_body}
 
 	return ns.AddCommand(cmd)
 }
@@ -35,71 +71,58 @@ func (interp *Interp) AddCommand(ns_name string, cmd Command) bool {
 func (interp *Interp) AddBuiltinCommands() {
 	ns_name := "::"
 
-	interp.AddCommand(ns_name, Command{"cd", 1, 1, []Arg{NewArg("dir")}, "", func(interp *Interp, frame *Frame) string {
+	// cd
+	interp.AddBuiltinCommand(ns_name, "cd", "dir", func(interp *Interp, frame *Frame) string {
 		dir, _ := frame.GetValue("dir")
 		os.Chdir(dir.String())
 		return ""
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"eval", 1, 1, []Arg{NewArg("script")}, "", func(interp *Interp, frame *Frame) string {
+	// eval
+	interp.AddBuiltinCommand(ns_name, "eval", "script", func(interp *Interp, frame *Frame) string {
 		script, _ := frame.GetValue("script")
 		return interp.Eval(script.String())
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"global", 1, 1, []Arg{NewArg("args")}, "", func(interp *Interp, frame *Frame) string {
+	// global
+	interp.AddBuiltinCommand(ns_name, "global", "args", func(interp *Interp, frame *Frame) string {
 		return ""
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"if", 1, 1, []Arg{NewArg("args")}, "", func(interp *Interp, frame *Frame) string {
+	// if
+	interp.AddBuiltinCommand(ns_name, "if", "args", func(interp *Interp, frame *Frame) string {
 		return ""
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"proc", 3, 3, []Arg{NewArg("name"), NewArg("args"), NewArg("body")}, "", func(interp *Interp, frame *Frame) string {
+	// list
+	interp.AddBuiltinCommand(ns_name, "list", "args", func(interp *Interp, frame *Frame) string {
+		return ""
+	})
+
+	// proc
+	interp.AddBuiltinCommand(ns_name, "proc", "name args body", func(interp *Interp, frame *Frame) string {
 		name, _ := frame.GetValue("name")
 		args, _ := frame.GetValue("args")
 		body, _ := frame.GetValue("body")
-
-		_, words, _ := ParseWords(args.String())
-
-		num_args := words.Len()
-		min_args := num_args
-
-		s_args := make([]Arg, num_args)
-
-		i := 0
-		for e := words.Front(); e != nil; e = e.Next() {
-			_, arg_words, _ := ParseWords(e.Value.(Word).String())
-			arg_name := arg_words.Remove(arg_words.Front()).(Word).String()
-
-			if arg_words.Len() == 0 {
-				s_args[i] = NewArg(arg_name)
-			} else {
-				arg_value := Value(arg_words.Remove(arg_words.Front()).(Word).String())
-				s_args[i] = NewArgDefault(arg_name, &arg_value)
-				if min_args == num_args {
-					min_args = i
-				}
-			}
-
-			i++
-		}
-
-		interp.AddCommand(ns_name, Command{name.String(), num_args, min_args, s_args, body.String(), nil})
+		interp.AddCommand(ns_name, name.String(), args.String(), body.String())
 		return ""
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"puts", 1, 1, []Arg{NewArg("string")}, "", func(interp *Interp, frame *Frame) string {
+	// puts
+	interp.AddBuiltinCommand(ns_name, "puts", "string", func(interp *Interp, frame *Frame) string {
 		str, _ := frame.GetValue("string")
 		fmt.Println(str.String())
 		return ""
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"pwd", 0, 0, []Arg{}, "", func(interp *Interp, frame *Frame) string {
+	// pwd
+	interp.AddBuiltinCommand(ns_name, "pwd", "", func(interp *Interp, frame *Frame) string {
 		cwd, _ := os.Getwd()
 		return cwd
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"set", 2, 1, []Arg{NewArg("varName"), NewArgDefault("newValue", nil)}, "", func(interp *Interp, frame *Frame) string {
+	// set
+	interp.AddBuiltinCommand(ns_name, "set", "varName newValue", func(interp *Interp, frame *Frame) string {
 		var ok bool
 		var value *Value
 
@@ -126,9 +149,10 @@ func (interp *Interp) AddBuiltinCommands() {
 		}
 
 		return value.String()
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"uplevel", 2, 2, []Arg{NewArg("level"), NewArg("arg")}, "", func(interp *Interp, frame *Frame) string {
+	// uplevel
+	interp.AddBuiltinCommand(ns_name, "uplevel", "level arg", func(interp *Interp, frame *Frame) string {
 		mylevel := frame.GetLevel()
 
 		level, _ := frame.GetValue("level")
@@ -148,9 +172,10 @@ func (interp *Interp) AddBuiltinCommands() {
 		}
 
 		return other_frame.Eval(interp, arg.String())
-	}})
+	})
 
-	interp.AddCommand(ns_name, Command{"upvar", 3, 3, []Arg{NewArg("level"), NewArg("otherVar"), NewArg("localVar")}, "", func(interp *Interp, frame *Frame) string {
+	// upvar
+	interp.AddBuiltinCommand(ns_name, "upvar", "level otherVar localVar", func(interp *Interp, frame *Frame) string {
 		mylevel := frame.GetLevel()
 
 		level, _ := frame.GetValue("level")
@@ -174,7 +199,7 @@ func (interp *Interp) AddBuiltinCommands() {
 		frame.SetValue(localVar.String(), otherValue)
 
 		return ""
-	}})
+	})
 }
 
 func (interp *Interp) FindCommand(name string, words *list.List) (cmd Command, error error) {
