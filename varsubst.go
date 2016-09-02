@@ -92,7 +92,7 @@ func VarSubstOnce(r []rune, variable variableFunc) ([]rune, int, error) {
 
 	name = r[start:idx]
 
-	if r[idx] == '(' {
+	if len(r) > idx && r[idx] == '(' {
 		var prev rune
 		start = idx + 1
 		for idx = start; idx < len(r); idx++ {
@@ -120,4 +120,20 @@ func VarSubstOnce(r []rune, variable variableFunc) ([]rune, int, error) {
 	}
 
 	return append(value, r[idx:]...), len(value), nil
+}
+
+func VarSubst(r []rune, variable variableFunc) ([]rune, error) {
+	for i := 0; i < len(r); i++ {
+		if r[i] != '$' {
+			continue
+		}
+		nb, length, err := VarSubstOnce(r[i:], variable)
+		if err != nil {
+			return nil, err
+		}
+		r = append(r[:i], nb...)
+		i += length
+	}
+
+	return r, nil
 }

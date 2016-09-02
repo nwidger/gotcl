@@ -2,12 +2,6 @@ package gotcl
 
 import "testing"
 
-type backslashSubstTest struct {
-	b          []rune
-	expected   []rune
-	expectedOk bool
-}
-
 func runeSlicesEqual(ra, rb []rune) bool {
 	if len(ra) != len(rb) {
 		return false
@@ -20,12 +14,18 @@ func runeSlicesEqual(ra, rb []rune) bool {
 	return true
 }
 
+type backslashSubstTest struct {
+	b          []rune
+	expected   []rune
+	expectedOk bool
+}
+
 func TestBackslashNewlineSubstOnce(t *testing.T) {
 	for _, btest := range []backslashSubstTest{
 		{[]rune("\\\n"), []rune(" "), true},
 		{[]rune("\\\n  	hello"), []rune(" hello"), true},
 	} {
-		actual, actualOk := backslashNewlineSubstOnce(btest.b)
+		actual, actualOk := BackslashNewlineSubstOnce(btest.b)
 		if actualOk != btest.expectedOk {
 			t.Fatalf("expected %v got %v for %q", btest.expectedOk, actualOk, btest.b)
 		}
@@ -61,7 +61,7 @@ func TestBackslashSubstOnce(t *testing.T) {
 		{[]rune(`\xfe`), []rune("þ"), true},
 		{[]rune(`\xff`), []rune("ÿ"), true},
 	} {
-		actual, actualOk := backslashSubstOnce(btest.b)
+		actual, actualOk := BackslashSubstOnce(btest.b)
 		if actualOk != btest.expectedOk {
 			t.Fatalf("expected %v got %v for %q", btest.expectedOk, actualOk, btest.b)
 		}
@@ -98,24 +98,81 @@ func noopVariableFunc(name, index []rune) (value []rune, err error) {
 	return value, nil
 }
 
+type varSubstOnceTest struct {
+	b              []rune
+	v              variableFunc
+	expected       []rune
+	expectedLength int
+	expectedErr    error
+}
+
+func TestVarSubstOnce(t *testing.T) {
+	for _, btest := range []varSubstOnceTest{
+		{[]rune(`$hello  `), noopVariableFunc, []rune("hello  "), 5, nil},
+		{[]rune(`${hello}  `), noopVariableFunc, []rune("hello  "), 5, nil},
+		{[]rune(`${hello}  bye`), noopVariableFunc, []rune("hello  bye"), 5, nil},
+	} {
+		actual, actualLength, actualErr := VarSubstOnce(btest.b, btest.v)
+		if !runeSlicesEqual(btest.expected, actual) {
+			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+		}
+		if actualLength != btest.expectedLength {
+			t.Fatalf("expected length %v got %v for %q", btest.expectedLength, actualLength, btest.b)
+		}
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
+	}
+}
+
 type varSubstTest struct {
 	b           []rune
 	v           variableFunc
 	expected    []rune
-	expectedIdx int
 	expectedErr error
 }
 
-func TestVarSubstOnce(t *testing.T) {
+func TestVarSubst(t *testing.T) {
 	for _, btest := range []varSubstTest{
-		{[]rune(`${hello}  `), noopVariableFunc, []rune("hello  "), 5, nil},
+		//
+		{[]rune(`$hello  `), noopVariableFunc, []rune("hello  "), nil},
+		{[]rune(`${hello}  `), noopVariableFunc, []rune("hello  "), nil},
+		{[]rune(`${hello}  bye`), noopVariableFunc, []rune("hello  bye"), nil},
+		{[]rune(`${hello}  $bye`), noopVariableFunc, []rune("hello  bye"), nil},
+		{[]rune(`  ${hello}  $bye `), noopVariableFunc, []rune("  hello  bye "), nil},
+		//
+		{[]rune(`$hello(idx)  `), noopVariableFunc, []rune("hello(idx)  "), nil},
+		{[]rune(`${hello(idx)}  `), noopVariableFunc, []rune("hello(idx)  "), nil},
+		{[]rune(`${hello(idx)}  bye`), noopVariableFunc, []rune("hello(idx)  bye"), nil},
+		{[]rune(`${hello(idx)}  $bye(idx)`), noopVariableFunc, []rune("hello(idx)  bye(idx)"), nil},
+		{[]rune(`  ${hello(idx)}  $bye(idx) `), noopVariableFunc, []rune("  hello(idx)  bye(idx) "), nil},
 	} {
-		actual, actualIdx, actualErr := VarSubstOnce(btest.b, btest.v)
+		actual, actualErr := VarSubst(btest.b, btest.v)
 		if !runeSlicesEqual(btest.expected, actual) {
 			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
-		if actualIdx != btest.expectedIdx {
-			t.Fatalf("expected idx %v got %v for %q", btest.expectedIdx, actualIdx, btest.b)
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
+	}
+}
+
+type substTest struct {
+	b           []rune
+	v           variableFunc
+	expected    []rune
+	expectedErr error
+}
+
+func TestSubst(t *testing.T) {
+	for _, btest := range []varSubstTest{
+		{[]rune(`$hello \xfe `), noopVariableFunc, []rune("hello þ "), nil},
+		{[]rune(`$hello \
+ \xfe `), noopVariableFunc, []rune("hello  þ "), nil},
+	} {
+		actual, actualErr := Subst(btest.b, btest.v)
+		if !runeSlicesEqual(btest.expected, actual) {
+			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
 		if actualErr != btest.expectedErr {
 			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)

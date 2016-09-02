@@ -5,7 +5,7 @@ import (
 	"unicode"
 )
 
-func backslashNewlineSubstOnce(r []rune) ([]rune, bool) {
+func BackslashNewlineSubstOnce(r []rune) ([]rune, bool) {
 	if len(r) < 2 || r[0] != '\\' {
 		return r, false
 	}
@@ -41,7 +41,7 @@ func BackslashNewlineSubst(r []rune) ([]rune, bool) {
 		if r[i] != '\\' {
 			continue
 		}
-		nb, ok := backslashNewlineSubstOnce(r[i:])
+		nb, ok := BackslashNewlineSubstOnce(r[i:])
 		if ok {
 			r = append(r[:i], nb...)
 		}
@@ -58,7 +58,7 @@ func BackslashNewlineSubst(r []rune) ([]rune, bool) {
 // to be included in words without triggering special processing. The
 // following table lists the backslash sequences that are handled
 // specially, along with the value that replaces each sequence.
-func backslashSubstOnce(r []rune) ([]rune, bool) {
+func BackslashSubstOnce(r []rune) ([]rune, bool) {
 	if len(r) < 2 || r[0] != '\\' {
 		return r, false
 	}
@@ -221,7 +221,7 @@ func BackslashSubst(r []rune) ([]rune, bool) {
 		if r[i] != '\\' {
 			continue
 		}
-		nb, ok := backslashSubstOnce(r[i:])
+		nb, ok := BackslashSubstOnce(r[i:])
 		if ok {
 			r = append(r[:i], nb...)
 		}
