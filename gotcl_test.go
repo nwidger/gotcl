@@ -14,6 +14,18 @@ func runeSlicesEqual(ra, rb []rune) bool {
 	return true
 }
 
+func runeSliceOfSlicesEqual(ra, rb [][]rune) bool {
+	if len(ra) != len(rb) {
+		return false
+	}
+	for i := 0; i < len(ra); i++ {
+		if !runeSlicesEqual(ra[i], rb[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 type backslashSubstTest struct {
 	b          []rune
 	expected   []rune
@@ -172,6 +184,78 @@ func TestSubst(t *testing.T) {
 	} {
 		actual, actualErr := Subst(btest.b, btest.v)
 		if !runeSlicesEqual(btest.expected, actual) {
+			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+		}
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
+	}
+}
+
+type parseDoubleQuoteWordTest struct {
+	b              []rune
+	expected       []rune
+	expectedLength int
+	expectedErr    error
+}
+
+func TestParseDoubleQuoteWord(t *testing.T) {
+	for _, btest := range []parseDoubleQuoteWordTest{
+		{[]rune(`"hello"`), []rune("hello"), 7, nil},
+		{[]rune(`"hello" bye`), []rune("hello"), 7, nil},
+		{[]rune(`"hello \" goodbye" bye`), []rune("hello \\\" goodbye"), 18, nil},
+	} {
+		actual, actualLength, actualErr := ParseDoubleQuoteWord(btest.b)
+		if !runeSlicesEqual(btest.expected, actual) {
+			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+		}
+		if actualLength != btest.expectedLength {
+			t.Fatalf("expected length %v got %v for %q", btest.expectedLength, actualLength, btest.b)
+		}
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
+	}
+}
+
+type parseBraceWordTest struct {
+	b              []rune
+	expected       []rune
+	expectedLength int
+	expectedErr    error
+}
+
+func TestParseBraceWord(t *testing.T) {
+	for _, btest := range []parseBraceWordTest{
+		{[]rune(`{hello}`), []rune("hello"), 7, nil},
+		{[]rune(`{hello {bye\}} \{ what}bye`), []rune("hello {bye\\}} \\{ what"), 23, nil},
+	} {
+		actual, actualLength, actualErr := ParseBraceWord(btest.b)
+		if !runeSlicesEqual(btest.expected, actual) {
+			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+		}
+		if actualLength != btest.expectedLength {
+			t.Fatalf("expected length %v got %v for %q", btest.expectedLength, actualLength, btest.b)
+		}
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
+	}
+}
+
+type parseWordsTest struct {
+	b           []rune
+	expected    [][]rune
+	expectedErr error
+}
+
+func TestParseWords(t *testing.T) {
+	for _, btest := range []parseWordsTest{
+		{[]rune(`  {hello}`), [][]rune{[]rune("hello")}, nil},
+		{[]rune(`  {hello}  "bye" what `), [][]rune{[]rune("hello"), []rune("bye"), []rune("what")}, nil},
+	} {
+		actual, actualErr := ParseWords(btest.b)
+		if !runeSliceOfSlicesEqual(btest.expected, actual) {
 			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
 		if actualErr != btest.expectedErr {

@@ -10,7 +10,6 @@ const (
 	SUBST_ALL = SUBST_COMMANDS | SUBST_VARIABLES | SUBST_BACKSLASHES
 )
 
-type substFunc func(script []rune, flags substFuncFlags) (value []rune, err error)
 type variableFunc func(name, index []rune) (value []rune, err error)
 
 // If a word contains a dollar-sign (“$”) followed by one of the forms
