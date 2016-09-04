@@ -5,7 +5,7 @@ import (
 	"unicode"
 )
 
-func ParseWord(r []rune) ([]rune, int, error) {
+func ParseBareWord(r []rune) ([]rune, int, error) {
 	var (
 		idx  int
 		prev rune
@@ -44,7 +44,7 @@ func ParseWord(r []rune) ([]rune, int, error) {
 // the characters between the quotes as described below. The
 // double-quotes are not retained as part of the word.
 func ParseDoubleQuoteWord(r []rune) ([]rune, int, error) {
-	if r[0] != '"' {
+	if len(r) == 0 || r[0] != '"' {
 		return nil, 0, fmt.Errorf("word does not start with double-quote")
 	}
 	if len(r) < 2 {
@@ -88,7 +88,7 @@ func ParseDoubleQuoteWord(r []rune) ([]rune, int, error) {
 // exactly the characters between the outer braces, not including the
 // braces themselves.
 func ParseBraceWord(r []rune) ([]rune, int, error) {
-	if r[0] != '{' {
+	if len(r) == 0 || r[0] != '{' {
 		return nil, 0, fmt.Errorf("word does not start with open brace")
 	}
 	if len(r) < 2 {
@@ -140,7 +140,20 @@ func ParseBraceWord(r []rune) ([]rune, int, error) {
 // [c]} d {*}{$e f {g h}}” is equivalent to “cmd a b {[c]} d {$e} f {g
 // h}”.
 func ParseArgumentExpansionWord(r []rune) ([]rune, int, error) {
-	return r, 0, nil
+	if len(r) < 4 ||
+		r[0] != '{' ||
+		r[1] != '*' ||
+		r[2] != '}' ||
+		unicode.IsSpace(r[3]) {
+		return nil, 0, fmt.Errorf("word does not start with '{*}' followed by a non-whitespace character")
+	}
+
+	nb, size, err := ParseWord(r[3:])
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return nb, size + 3, nil
 }
 
 // If a word contains an open bracket (“[”) then Tcl performs command
@@ -154,7 +167,7 @@ func ParseArgumentExpansionWord(r []rune) ([]rune, int, error) {
 // word. Command substitution is not performed on words enclosed in
 // braces.
 func ParseBracketWord(r []rune) ([]rune, int, error) {
-	if r[0] != '[' {
+	if len(r) == 0 || r[0] != '[' {
 		return nil, 0, fmt.Errorf("word does not start with open bracket")
 	}
 	if len(r) < 2 {
@@ -195,12 +208,6 @@ func ParseBracketWord(r []rune) ([]rune, int, error) {
 // Words of a command are separated by white space (except for
 // newlines, which are command separators).
 func ParseWords(r []rune) ([][]rune, error) {
-	var (
-		w    []rune
-		size int
-		err  error
-	)
-
 	nb, ok := BackslashNewlineSubst(r)
 	if ok {
 		r = nb
@@ -218,16 +225,11 @@ func ParseWords(r []rune) ([][]rune, error) {
 			break
 		}
 
-		switch {
-		case unicode.IsSpace(c):
+		if unicode.IsSpace(c) {
 			continue
-		case c == '"':
-			w, size, err = ParseDoubleQuoteWord(r[i:])
-		case c == '{':
-			w, size, err = ParseBraceWord(r[i:])
-		default:
-			w, size, err = ParseWord(r[i:])
 		}
+
+		w, size, err := ParseWord(r[i:])
 		if err != nil {
 			return nil, err
 		}
@@ -238,4 +240,15 @@ func ParseWords(r []rune) ([][]rune, error) {
 	}
 
 	return ws, nil
+}
+
+func ParseWord(r []rune) ([]rune, int, error) {
+	switch {
+	case r[0] == '"':
+		return ParseDoubleQuoteWord(r)
+	case r[0] == '{':
+		return ParseBraceWord(r)
+	default:
+		return ParseBareWord(r)
+	}
 }

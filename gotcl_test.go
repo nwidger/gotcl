@@ -259,6 +259,7 @@ func TestParseWords(t *testing.T) {
 		{[]rune(`  "hi [ set x ] bye"`), [][]rune{[]rune("hi [ set x ] bye")}, nil},
 		{[]rune(`  "hi ] bye"`), [][]rune{[]rune("hi ] bye")}, nil},
 		{[]rune(`  "hi ; bye"`), [][]rune{[]rune("hi ; bye")}, nil},
+		{[]rune(`  {*}{hi bye}`), [][]rune{[]rune("hi bye")}, nil},
 	} {
 		actual, actualErr := ParseWords(btest.b)
 		if !runeSliceOfSlicesEqual(btest.expected, actual) {
