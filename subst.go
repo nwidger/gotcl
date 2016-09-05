@@ -14,12 +14,12 @@ func Subst(r []rune, variable variableFunc) ([]rune, error) {
 				r = append(r[:i], nb...)
 			}
 		case '$':
-			nb, length, err := VarSubstOnce(r[i:], variable)
+			nb, length, err := ParseVar(r[i:], variable)
 			if err != nil {
 				return nil, err
 			}
 			r = append(r[:i], nb...)
-			i += length
+			i += length - 1
 		default:
 			continue
 		}

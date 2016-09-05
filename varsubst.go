@@ -1,14 +1,6 @@
 package gotcl
 
-type substFuncFlags int
-
-const (
-	SUBST_COMMANDS substFuncFlags = iota
-	SUBST_VARIABLES
-	SUBST_BACKSLASHES
-
-	SUBST_ALL = SUBST_COMMANDS | SUBST_VARIABLES | SUBST_BACKSLASHES
-)
+import "fmt"
 
 type variableFunc func(name, index []rune) (value []rune, err error)
 
@@ -52,65 +44,87 @@ type variableFunc func(name, index []rune) (value []rune, err error)
 // Note that variables may contain character sequences other than
 // those listed above, but in that case other mechanisms must be used
 // to access them (e.g., via the set command's single-argument form).
-func VarSubstOnce(r []rune, variable variableFunc) ([]rune, int, error) {
-	if len(r) < 2 || r[0] != '$' {
-		return nil, 0, nil
+func ParseVarName(r []rune) ([]rune, []rune, int, error) {
+	var (
+		name  []rune
+		index []rune
+		idx   int
+		prev  rune
+	)
+
+	if len(r) == 0 || r[0] != '$' {
+		return nil, nil, 0, fmt.Errorf("must start with '$'")
 	}
 
-	brace := false
-	start := 1
-	nameChar := func(r rune) bool {
-		return r == '_' || r == ':' ||
+	start, closed, brace, array := 1, true, false, false
+	if r[1] == '{' {
+		start, closed, brace = 2, false, true
+	}
+
+	colons := 0
+	nameChar := func(r, prev rune) bool {
+		if array {
+			closed = r == ')' && prev != '\\'
+			return !closed
+		}
+		if brace {
+			closed = r == '}'
+			return !closed
+		}
+
+		if r == ':' {
+			colons++
+			return true
+		} else {
+			if prev == ':' && colons < 2 {
+				return false
+			}
+			colons = 0
+		}
+		return r == '_' ||
 			('0' <= r && r <= '9') ||
 			('a' <= r && r <= 'z') ||
 			('A' <= r && r <= 'Z')
 	}
 
-	if r[1] == '{' {
-		brace = true
-		start = 2
-		nameChar = func(r rune) bool {
-			return r != '}'
-		}
-	}
-
-	var idx int
 	for idx = start; idx < len(r); idx++ {
-		if r[idx] == '(' {
+		if !brace && !array && r[idx] == '(' {
+			name = r[start:idx]
+			start, closed, array = idx+1, false, true
+		}
+
+		if !nameChar(r[idx], prev) {
 			break
 		}
-		if !nameChar(r[idx]) {
-			break
+
+		prev = r[idx]
+	}
+	if !closed {
+		if brace {
+			return nil, nil, 0, fmt.Errorf("missing close-brace for variable name")
+		}
+		if array {
+			return nil, nil, 0, fmt.Errorf("missing )")
 		}
 	}
 
-	var (
-		name  []rune
-		index []rune
-	)
-
-	name = r[start:idx]
-
-	if len(r) > idx && r[idx] == '(' {
-		var prev rune
-		start = idx + 1
-		for idx = start; idx < len(r); idx++ {
-			if r[idx] == ')' && (brace || prev != '\\') {
-				break
-			}
-			prev = r[idx]
-		}
+	if !array {
+		name = r[start:idx]
+	} else {
 		index = r[start:idx]
-		idx++
-
-		if !brace {
-			// TODO: perform command, variable and
-			// backslash substitution on index
-		}
 	}
 
-	if brace {
+	if brace || array {
 		idx++
+	}
+
+	return name, index, idx, nil
+}
+
+func ParseVar(r []rune, variable variableFunc) ([]rune, int, error) {
+	name, index, size, err := ParseVarName(r)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	value, err := variable(name, index)
@@ -118,7 +132,7 @@ func VarSubstOnce(r []rune, variable variableFunc) ([]rune, int, error) {
 		return nil, 0, err
 	}
 
-	return append(value, r[idx:]...), len(value), nil
+	return append(value, r[size:]...), len(value), nil
 }
 
 func VarSubst(r []rune, variable variableFunc) ([]rune, error) {
@@ -126,7 +140,7 @@ func VarSubst(r []rune, variable variableFunc) ([]rune, error) {
 		if r[i] != '$' {
 			continue
 		}
-		nb, length, err := VarSubstOnce(r[i:], variable)
+		nb, length, err := ParseVar(r[i:], variable)
 		if err != nil {
 			return nil, err
 		}

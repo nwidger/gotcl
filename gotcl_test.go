@@ -121,10 +121,11 @@ type varSubstOnceTest struct {
 func TestVarSubstOnce(t *testing.T) {
 	for _, btest := range []varSubstOnceTest{
 		{[]rune(`$hello  `), noopVariableFunc, []rune("hello  "), 5, nil},
+		{[]rune(`$hello:bye`), noopVariableFunc, []rune("hello:bye"), 6, nil},
 		{[]rune(`${hello}  `), noopVariableFunc, []rune("hello  "), 5, nil},
 		{[]rune(`${hello}  bye`), noopVariableFunc, []rune("hello  bye"), 5, nil},
 	} {
-		actual, actualLength, actualErr := VarSubstOnce(btest.b, btest.v)
+		actual, actualLength, actualErr := ParseVar(btest.b, btest.v)
 		if !runeSlicesEqual(btest.expected, actual) {
 			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
@@ -145,7 +146,7 @@ type varSubstTest struct {
 }
 
 func TestVarSubst(t *testing.T) {
-	for _, btest := range []varSubstTest{
+	for i, btest := range []varSubstTest{
 		//
 		{[]rune(`$hello  `), noopVariableFunc, []rune("hello  "), nil},
 		{[]rune(`${hello}  `), noopVariableFunc, []rune("hello  "), nil},
@@ -154,17 +155,19 @@ func TestVarSubst(t *testing.T) {
 		{[]rune(`  ${hello}  $bye `), noopVariableFunc, []rune("  hello  bye "), nil},
 		//
 		{[]rune(`$hello(idx)  `), noopVariableFunc, []rune("hello(idx)  "), nil},
+		{[]rune(`$hello(idx)`), noopVariableFunc, []rune("hello(idx)"), nil},
 		{[]rune(`${hello(idx)}  `), noopVariableFunc, []rune("hello(idx)  "), nil},
+		{[]rune(`${hello(idx)}`), noopVariableFunc, []rune("hello(idx)"), nil},
 		{[]rune(`${hello(idx)}  bye`), noopVariableFunc, []rune("hello(idx)  bye"), nil},
 		{[]rune(`${hello(idx)}  $bye(idx)`), noopVariableFunc, []rune("hello(idx)  bye(idx)"), nil},
 		{[]rune(`  ${hello(idx)}  $bye(idx) `), noopVariableFunc, []rune("  hello(idx)  bye(idx) "), nil},
 	} {
 		actual, actualErr := VarSubst(btest.b, btest.v)
 		if !runeSlicesEqual(btest.expected, actual) {
-			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+			t.Fatalf("%d: expected %q got %q for %q", i, string(btest.expected), string(actual), string(btest.b))
 		}
 		if actualErr != btest.expectedErr {
-			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+			t.Fatalf("%d: expected err %v got %v for %q", i, btest.expectedErr, actualErr, btest.b)
 		}
 	}
 }
@@ -179,12 +182,15 @@ type substTest struct {
 func TestSubst(t *testing.T) {
 	for _, btest := range []varSubstTest{
 		{[]rune(`$hello \xfe `), noopVariableFunc, []rune("hello þ "), nil},
+		{[]rune(`$hello\xfe`), noopVariableFunc, []rune("helloþ"), nil},
+		{[]rune(`$hello(idx\)) \xfe `), noopVariableFunc, []rune("hello(idx\\)) þ "), nil},
+		{[]rune(`$hello(idx)\xfe`), noopVariableFunc, []rune("hello(idx)þ"), nil},
 		{[]rune(`$hello \
  \xfe `), noopVariableFunc, []rune("hello  þ "), nil},
 	} {
 		actual, actualErr := Subst(btest.b, btest.v)
 		if !runeSlicesEqual(btest.expected, actual) {
-			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+			t.Fatalf("expected %q got %q for %q", string(btest.expected), string(actual), string(btest.b))
 		}
 		if actualErr != btest.expectedErr {
 			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
@@ -205,7 +211,7 @@ func TestParseDoubleQuoteWord(t *testing.T) {
 		{[]rune(`"hello" bye`), []rune("hello"), 7, nil},
 		{[]rune(`"hello \" goodbye" bye`), []rune("hello \\\" goodbye"), 18, nil},
 	} {
-		actual, actualLength, actualErr := ParseDoubleQuoteWord(btest.b)
+		actual, actualLength, actualErr := ParseQuotedString(btest.b)
 		if !runeSlicesEqual(btest.expected, actual) {
 			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
@@ -228,17 +234,18 @@ type parseBraceWordTest struct {
 func TestParseBraceWord(t *testing.T) {
 	for _, btest := range []parseBraceWordTest{
 		{[]rune(`{hello}`), []rune("hello"), 7, nil},
-		{[]rune(`{hello {bye\}} \{ what}bye`), []rune("hello {bye\\}} \\{ what"), 23, nil},
+		{[]rune(`{x}`), []rune("x"), 3, nil},
+		{[]rune(`{hello {bye\}} \{ what} bye`), []rune("hello {bye\\}} \\{ what"), 23, nil},
 	} {
-		actual, actualLength, actualErr := ParseBraceWord(btest.b)
+		actual, actualLength, actualErr := ParseBraces(btest.b)
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
 		if !runeSlicesEqual(btest.expected, actual) {
 			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
 		if actualLength != btest.expectedLength {
 			t.Fatalf("expected length %v got %v for %q", btest.expectedLength, actualLength, btest.b)
-		}
-		if actualErr != btest.expectedErr {
-			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
 		}
 	}
 }
@@ -260,6 +267,8 @@ func TestParseWords(t *testing.T) {
 		{[]rune(`  "hi ] bye"`), [][]rune{[]rune("hi ] bye")}, nil},
 		{[]rune(`  "hi ; bye"`), [][]rune{[]rune("hi ; bye")}, nil},
 		{[]rune(`  {*}{hi bye}`), [][]rune{[]rune("hi bye")}, nil},
+		{[]rune(`if {x} {puts "hello";}`), [][]rune{[]rune("if"), []rune("x"), []rune("puts \"hello\";")}, nil},
+		{[]rune(`if "x" {puts "hello";}`), [][]rune{[]rune("if"), []rune("x"), []rune("puts \"hello\";")}, nil},
 	} {
 		actual, actualErr := ParseWords(btest.b)
 		if !runeSliceOfSlicesEqual(btest.expected, actual) {

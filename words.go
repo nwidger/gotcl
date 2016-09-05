@@ -5,34 +5,32 @@ import (
 	"unicode"
 )
 
-func ParseBareWord(r []rune) ([]rune, int, error) {
-	var (
-		idx  int
-		prev rune
-	)
+type simpleWord []rune
+type expandWord []rune
 
-	for idx = 1; idx < len(r); idx++ {
+func ParseSimpleWord(r []rune) ([]rune, int, error) {
+	var idx int
+
+	for idx = 0; idx < len(r); idx++ {
 		c := r[idx]
 
 		if unicode.IsSpace(c) {
 			break
 		}
 
-		if c == '[' && prev != '\\' {
+		if c == '[' && (idx == 0 || r[idx-1] != '\\') {
 			_, size, err := ParseBracketWord(r[idx:])
 			if err != nil {
 				return nil, 0, err
 			}
 			idx += size
 		}
-
-		prev = c
 	}
 	if idx > len(r) {
 		idx = len(r)
 	}
 
-	return r[:idx], idx + 1, nil
+	return r[:idx], idx, nil
 }
 
 // If the first character of a word is double-quote (“"”) then the
@@ -43,7 +41,7 @@ func ParseBareWord(r []rune) ([]rune, int, error) {
 // variable substitution, and backslash substitution are performed on
 // the characters between the quotes as described below. The
 // double-quotes are not retained as part of the word.
-func ParseDoubleQuoteWord(r []rune) ([]rune, int, error) {
+func ParseQuotedString(r []rune) ([]rune, int, error) {
 	if len(r) == 0 || r[0] != '"' {
 		return nil, 0, fmt.Errorf("word does not start with double-quote")
 	}
@@ -72,6 +70,13 @@ func ParseDoubleQuoteWord(r []rune) ([]rune, int, error) {
 		return nil, 0, fmt.Errorf("unterminated double-quote word")
 	}
 
+	if idx+1 < len(r) &&
+		r[idx+1] != ';' &&
+		r[idx+1] != '\n' &&
+		!unicode.IsSpace(r[idx+1]) {
+		return nil, 0, fmt.Errorf("extra characters after close-quote")
+	}
+
 	return r[1:idx], idx + 1, nil
 }
 
@@ -87,20 +92,12 @@ func ParseDoubleQuoteWord(r []rune) ([]rune, int, error) {
 // receive any special interpretation. The word will consist of
 // exactly the characters between the outer braces, not including the
 // braces themselves.
-func ParseBraceWord(r []rune) ([]rune, int, error) {
+func ParseBraces(r []rune) ([]rune, int, error) {
 	if len(r) == 0 || r[0] != '{' {
 		return nil, 0, fmt.Errorf("word does not start with open brace")
 	}
 	if len(r) < 2 {
 		return nil, 0, fmt.Errorf("unterminated brace word")
-	}
-
-	if len(r) >= 4 &&
-		r[0] == '{' &&
-		r[1] == '*' &&
-		r[2] == '}' &&
-		!unicode.IsSpace(r[3]) {
-		return ParseArgumentExpansionWord(r)
 	}
 
 	var prev rune
@@ -121,9 +118,19 @@ func ParseBraceWord(r []rune) ([]rune, int, error) {
 		}
 		prev = c
 	}
+	if idx > len(r) {
+		idx = len(r)
+	}
 
 	if open != 0 {
 		return nil, 0, fmt.Errorf("unterminated brace word")
+	}
+
+	if idx+1 < len(r) &&
+		r[idx+1] != ';' &&
+		r[idx+1] != '\n' &&
+		!unicode.IsSpace(r[idx+1]) {
+		return nil, 0, fmt.Errorf("extra characters after close-quote")
 	}
 
 	return r[1:idx], idx + 1, nil
@@ -215,13 +222,12 @@ func ParseWords(r []rune) ([][]rune, error) {
 
 	ws := [][]rune{}
 
-	var prev rune
 	idx := 0
 
 	for i := idx; i < len(r); i++ {
 		c := r[i]
 
-		if (c == ';' || c == '\n') && prev != '\\' {
+		if (c == ';' || c == '\n') && (i == 0 || r[i-1] != '\\') {
 			break
 		}
 
@@ -235,20 +241,24 @@ func ParseWords(r []rune) ([][]rune, error) {
 		}
 		ws = append(ws, w)
 		i += size
-
-		prev = c
 	}
 
 	return ws, nil
 }
 
 func ParseWord(r []rune) ([]rune, int, error) {
+	if len(r) == 0 {
+		return r, 0, nil
+	}
+
 	switch {
 	case r[0] == '"':
-		return ParseDoubleQuoteWord(r)
+		return ParseQuotedString(r)
+	case len(r) >= 4 && r[0] == '{' && r[1] == '*' && r[2] == '}' && !unicode.IsSpace(r[3]):
+		return ParseArgumentExpansionWord(r)
 	case r[0] == '{':
-		return ParseBraceWord(r)
+		return ParseBraces(r)
 	default:
-		return ParseBareWord(r)
+		return ParseSimpleWord(r)
 	}
 }
