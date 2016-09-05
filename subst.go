@@ -1,15 +1,10 @@
 package gotcl
 
 func Subst(r []rune, variable variableFunc) ([]rune, error) {
-	nb, ok := BackslashNewlineSubst(r)
-	if ok {
-		r = nb
-	}
-
 	for i := 0; i < len(r); i++ {
 		switch r[i] {
 		case '\\':
-			nb, ok = BackslashSubstOnce(r[i:])
+			nb, ok := BackslashSubstOnce(r[i:])
 			if ok {
 				r = append(r[:i], nb...)
 			}

@@ -214,15 +214,11 @@ func ParseBracketWord(r []rune) ([]rune, int, error) {
 //
 // Words of a command are separated by white space (except for
 // newlines, which are command separators).
-func ParseWords(r []rune) ([][]rune, error) {
-	nb, ok := BackslashNewlineSubst(r)
-	if ok {
-		r = nb
-	}
-
+func ParseWords(r []rune) ([][]rune, int, error) {
 	ws := [][]rune{}
 
 	idx := 0
+	totalSize := 0
 
 	for i := idx; i < len(r); i++ {
 		c := r[i]
@@ -237,13 +233,14 @@ func ParseWords(r []rune) ([][]rune, error) {
 
 		w, size, err := ParseWord(r[i:])
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		ws = append(ws, w)
 		i += size
+		totalSize += size
 	}
 
-	return ws, nil
+	return ws, totalSize, nil
 }
 
 func ParseWord(r []rune) ([]rune, int, error) {

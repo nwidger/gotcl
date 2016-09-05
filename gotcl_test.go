@@ -185,8 +185,7 @@ func TestSubst(t *testing.T) {
 		{[]rune(`$hello\xfe`), noopVariableFunc, []rune("helloþ"), nil},
 		{[]rune(`$hello(idx\)) \xfe `), noopVariableFunc, []rune("hello(idx\\)) þ "), nil},
 		{[]rune(`$hello(idx)\xfe`), noopVariableFunc, []rune("hello(idx)þ"), nil},
-		{[]rune(`$hello \
- \xfe `), noopVariableFunc, []rune("hello  þ "), nil},
+		{[]rune(`$hello  \xfe `), noopVariableFunc, []rune("hello  þ "), nil},
 	} {
 		actual, actualErr := Subst(btest.b, btest.v)
 		if !runeSlicesEqual(btest.expected, actual) {
@@ -270,7 +269,35 @@ func TestParseWords(t *testing.T) {
 		{[]rune(`if {x} {puts "hello";}`), [][]rune{[]rune("if"), []rune("x"), []rune("puts \"hello\";")}, nil},
 		{[]rune(`if "x" {puts "hello";}`), [][]rune{[]rune("if"), []rune("x"), []rune("puts \"hello\";")}, nil},
 	} {
-		actual, actualErr := ParseWords(btest.b)
+		actual, _, actualErr := ParseWords(btest.b)
+		if !runeSliceOfSlicesEqual(btest.expected, actual) {
+			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
+		}
+		if actualErr != btest.expectedErr {
+			t.Fatalf("expected err %v got %v for %q", btest.expectedErr, actualErr, btest.b)
+		}
+	}
+}
+
+type parseCommandTest struct {
+	b           []rune
+	expected    [][]rune
+	expectedErr error
+}
+
+func TestParseCommand(t *testing.T) {
+	for _, btest := range []parseCommandTest{
+		{[]rune(`  {hello}`), [][]rune{[]rune("hello")}, nil},
+		{[]rune(`  {hello}  "bye" what `), [][]rune{[]rune("hello"), []rune("bye"), []rune("what")}, nil},
+		{[]rune(`puts  \"hello `), [][]rune{[]rune("puts"), []rune("\"hello")}, nil},
+		{[]rune(`  {set x}`), [][]rune{[]rune("set x")}, nil},
+		{[]rune(`  "hi ] bye"`), [][]rune{[]rune("hi ] bye")}, nil},
+		{[]rune(`  "hi ; bye"`), [][]rune{[]rune("hi ; bye")}, nil},
+		{[]rune(`  {*}{hi bye}`), [][]rune{[]rune("hi bye")}, nil},
+		{[]rune(`if {x} {puts "hello";}`), [][]rune{[]rune("if"), []rune("x"), []rune("puts \"hello\";")}, nil},
+		{[]rune(`if "x" {puts "hello";}`), [][]rune{[]rune("if"), []rune("x"), []rune("puts \"hello\";")}, nil},
+	} {
+		actual, _, actualErr := ParseCommand(btest.b)
 		if !runeSliceOfSlicesEqual(btest.expected, actual) {
 			t.Fatalf("expected %q got %q for %q", btest.expected, actual, btest.b)
 		}
