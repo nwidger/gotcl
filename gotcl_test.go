@@ -85,9 +85,8 @@ func dumpWords(ws words) {
 
 func TestParseCommand(t *testing.T) {
 	for _, str := range []string{
-		`
-set s(name)\
- {*}"hi $x bye" \
+		`$xyz`, `$::abc::xyz`, `$::abc::xyz(asdf)`, `${::abc::xyz(asdf)}`, `$xyz(asdf$xyz%)`, `${xyz(asdf)}`, `${xyz(asdf))}`, ` set s(name)\
+ {*}"hi $x ${x(hi)} bye" \
     xyz[set y 2]123
 `,
 		`
@@ -129,5 +128,41 @@ set x 123`, `
 set x 123`} {
 		r, size, err := ParseComment([]rune(str))
 		fmt.Printf("%v %v %v %q\n", string(r), size, err, str[size:])
+	}
+}
+
+func TestParseCommands(t *testing.T) {
+	for _, str := range []string{
+		`
+# blah blah blah
+# blah blah
+set s(name)\
+ {*}"hi $x bye" \
+    xyz[set y 2]123
+
+# blah blah blah
+# blah blah
+puts hello
+
+# blah blee bloo
+if {1} {
+  puts \
+      goodbye
+}
+`,
+	} {
+		r := []rune(str)
+		for idx := 0; idx < len(r); idx++ {
+			ws, size, err := ParseCommand(r[idx:], false)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+			if size > 0 {
+				idx += size - 1
+			}
+			fmt.Println(size, err)
+			dumpWords(ws)
+		}
 	}
 }

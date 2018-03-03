@@ -28,14 +28,14 @@ const (
 )
 
 func ParseAllWhiteSpace(r []rune) ([]rune, int, error) {
-	return ParseWhiteSpaceAux(r, true)
+	return parseWhiteSpace(r, true)
 }
 
 func ParseWhiteSpace(r []rune) ([]rune, int, error) {
-	return ParseWhiteSpaceAux(r, false)
+	return parseWhiteSpace(r, false)
 }
 
-func ParseWhiteSpaceAux(r []rune, newlines bool) ([]rune, int, error) {
+func parseWhiteSpace(r []rune, newlines bool) ([]rune, int, error) {
 	var (
 		idx int
 	)
@@ -110,9 +110,6 @@ func ParseComment(r []rune) ([]rune, int, error) {
 			}
 		}
 	}
-	if idx > len(r) {
-		idx = len(r)
-	}
 	return r[:idx], idx, nil
 }
 
@@ -168,9 +165,6 @@ func ParseCommand(r []rune, nested bool) (words, int, error) {
 		}
 		ws = append(ws, w)
 		prev = r[idx]
-	}
-	if idx > len(r) {
-		idx = len(r)
 	}
 	return ws, idx, nil
 }
@@ -498,9 +492,6 @@ func ParseTokens(r []rune, terminators TermType, substs SubstType) (tokens, int,
 		ts = append(ts, tok)
 		prev = r[idx]
 	}
-	if idx > len(r) {
-		idx = len(r)
-	}
 
 	return ts, idx, nil
 }
@@ -593,7 +584,7 @@ func ParseVarNameToken(r []rune) (token, int, error) {
 	}
 
 	for idx = start; idx < len(r); idx++ {
-		if !brace && !array && r[idx] == '(' {
+		if !array && r[idx] == '(' {
 			name = r[start:idx]
 			start, closed, array = idx+1, false, true
 		}
@@ -622,7 +613,10 @@ func ParseVarNameToken(r []rune) (token, int, error) {
 		index = r[start:idx]
 	}
 
-	if brace || array {
+	if brace {
+		idx++
+	}
+	if array {
 		idx++
 	}
 
@@ -867,26 +861,13 @@ func SubstBackslashToken(r bsToken) (token, error) {
 }
 
 var (
-	// commands consist of combination of wordToken,
-	// simpleWordToken and expandWordToken
-
-	// wordToken consists of combination of textToken, bsToken,
-	// commandToken and variableToken.
 	_ word = wordToken{}
-	// simpleWordToken consists of a single textToken
 	_ word = simpleWordToken{}
-	// expandWordToken is a wordToken but was prefixed by
-	// expansion prefix {*}
 	_ word = expandWordToken{}
 
-	// text literal
 	_ token = textToken{}
-	// backslash literal
 	_ token = bsToken{}
-	// command, including square brackets []'s
 	_ token = commandToken{}
-	// variable, including $, name and array index including
-	// parentheses
 	_ token = variableToken{}
 
 	_ token = subExprToken{}
@@ -896,6 +877,7 @@ var (
 type word interface {
 	fmt.Stringer
 	isWord()
+	Subst(substs SubstType) (string, error)
 }
 
 type words []word
@@ -911,22 +893,26 @@ func (ws words) String() string {
 	return b.String()
 }
 
+func (ws words) Subst(substs SubstType) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(ws); i++ {
+		w := ws[i]
+		s, err := w.Subst(substs)
+		if err != nil {
+			return "", err
+		}
+		_, err = b.WriteString(s)
+		if err != nil {
+			return "", err
+		}
+
+	}
+	return b.String(), nil
+}
+
 // This token ordinarily describes one word of a command but it may
-// also describe a quoted or braced string in an expression. The token
-// describes a component of the script that is the result of
-// concatenating together a sequence of subcomponents, each described
-// by a separate subtoken. The token starts with the first non-blank
-// character of the component (which may be a double-quote or open
-// brace) and includes all characters in the component up to but not
-// including the space, semicolon, close bracket, close quote, or
-// close brace that terminates the component. The numComponents field
-// counts the total number of sub-tokens that make up the word,
-// including sub-tokens of TCL_TOKEN_VARIABLE and TCL_TOKEN_BS tokens.
-//
-// double-quote -> [textToken|commandToken|variableToken|bsToken]+
-// brace        -> [textToken|bsToken (if contained backslash-newlines)]+
-// otherwise    -> textToken
-type wordToken []token
+// also describe a quoted or braced string in an expression.
+type wordToken tokens
 
 func (_ wordToken) isWord() {}
 
@@ -941,21 +927,41 @@ func (w wordToken) String() string {
 	return b.String()
 }
 
-// This token has the same meaning as TCL_TOKEN_WORD, except that the
-// word is guaranteed to consist of a single TCL_TOKEN_TEXT
-// sub-token. The numComponents field is always 1.
+func (w wordToken) Subst(substs SubstType) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(w); i++ {
+		tok := w[i]
+		s, err := tok.Subst(substs)
+		if err != nil {
+			return "", err
+		}
+		_, err = b.WriteString(s)
+		if err != nil {
+			return "", err
+		}
+
+	}
+	return b.String(), nil
+}
+
+// This token has the same meaning as wordToken, except that the word
+// is guaranteed to consist of a single textToken sub-token.
 type simpleWordToken textToken
 
 func (_ simpleWordToken) isWord() {}
 
 func (w simpleWordToken) String() string { return string(w) }
 
-// This token has the same meaning as TCL_TOKEN_WORD, except that the
-// command parser notes this word began with the expansion prefix {*},
-// indicating that after substitution, the list value of this word
-// should be expanded to form multiple arguments in command
-// evaluation. This token type can only be created by
-// Tcl_ParseCommand.
+func (w simpleWordToken) Subst(substs SubstType) (string, error) {
+	s, err := textToken(w).Subst(substs)
+	if err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
+// This token has the same meaning as wordToken, except that the
+// command parser notes this word began with the expansion prefix {*}.
 type expandWordToken struct {
 	word
 }
@@ -965,6 +971,7 @@ func (w expandWordToken) String() string { return "{*}" + w.word.String() }
 type token interface {
 	fmt.Stringer
 	isToken()
+	Subst(substs SubstType) (string, error)
 }
 
 type tokens []token
@@ -980,51 +987,59 @@ func (ts tokens) String() string {
 	return b.String()
 }
 
-// The token describes a range of literal text that is part of a
-// word. The numComponents field is always 0.
+func (ts tokens) Subst(substs SubstType) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(ts); i++ {
+		tok := ts[i]
+		s, err := tok.Subst(substs)
+		if err != nil {
+			return "", err
+		}
+		_, err = b.WriteString(s)
+		if err != nil {
+			return "", err
+		}
+	}
+	return b.String(), nil
+}
+
+// The token describes a range of literal text that is part of a word.
 type textToken []rune
 
 func (t textToken) isToken() {}
 
 func (t textToken) String() string { return string(t) }
 
-// The token describes a backslash sequence such as \n or \0xa3. The
-// numComponents field is always 0.
+func (t textToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+
+// The token describes a backslash sequence such as \n or \0xa3.
 type bsToken textToken
 
 func (t bsToken) isToken() {}
 
 func (t bsToken) String() string { return string(t) }
 
+func (t bsToken) Subst(substs SubstType) (string, error) {
+	tok, err := SubstBackslashToken(t)
+	if err != nil {
+		return "", err
+	}
+	return tok.String(), nil
+}
+
 // The token describes a command whose result must be substituted into
-// the word. The token includes the square brackets that surround the
-// command. The numComponents field is always 0 (the nested command is
-// not parsed; call Tcl_ParseCommand recursively if you want to see
-// its tokens).
-//
-// command (after parsing) -> [wordToken|simpleWordToken|expandWordToken]+
+// the word.
 type commandToken textToken
 
 func (t commandToken) isToken() {}
 
 func (t commandToken) String() string { return string(t) }
 
+func (t commandToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+
 // The token describes a variable substitution, including the $,
 // variable name, and array index (if there is one) up through the
-// close parenthesis that terminates the index. This token is followed
-// by one or more additional tokens that describe the variable name
-// and array index. If numComponents is 1 then the variable is a
-// scalar and the next token is a TCL_TOKEN_TEXT token that gives the
-// variable name. If numComponents is greater than 1 then the variable
-// is an array: the first sub-token is a TCL_TOKEN_TEXT token giving
-// the array name and the remaining sub-tokens are TCL_TOKEN_TEXT,
-// TCL_TOKEN_BS, TCL_TOKEN_COMMAND, and TCL_TOKEN_VARIABLE tokens that
-// must be concatenated to produce the array index. The numComponents
-// field includes nested sub-tokens that are part of
-// TCL_TOKEN_VARIABLE tokens in the array index.
-//
-// scalar -> textToken
-// array  -> textToken [textToken|bsToken|commandToken|variableToken]+
+// close parenthesis that terminates the index.
 type variableToken []token
 
 func (t variableToken) isToken() {}
@@ -1036,50 +1051,24 @@ func (t variableToken) String() string {
 	return t[0].String()
 }
 
-// The token describes one subexpression of an expression (or an
-// entire expression). A subexpression may consist of a value such as
-// an integer literal, variable substitution, or parenthesized
-// subexpression; it may also consist of an operator and its
-// operands. The token starts with the first non-blank character of
+func (t variableToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
 
-// the subexpression up to but not including the space, brace,
-// close-paren, or bracket that terminates the subexpression. This
-// token is followed by one or more additional tokens that describe
-// the subexpression. If the first sub-token after the
-// TCL_TOKEN_SUB_EXPR token is a TCL_TOKEN_OPERATOR token, the
-// subexpression consists of an operator and its token operands. If
-// the operator has no operands, the subexpression consists of just
-// the TCL_TOKEN_OPERATOR token. Each operand is described by a
-// TCL_TOKEN_SUB_EXPR token. Otherwise, the subexpression is a value
-// described by one of the token types TCL_TOKEN_WORD, TCL_TOKEN_TEXT,
-// TCL_TOKEN_BS, TCL_TOKEN_COMMAND, TCL_TOKEN_VARIABLE, and
-// TCL_TOKEN_SUB_EXPR. The numComponents field counts the total number
-// of sub-tokens that make up the subexpression; this includes the
-// sub-tokens for any nested TCL_TOKEN_SUB_EXPR tokens.
+// The token describes one subexpression of an expression (or an
+// entire expression).
 type subExprToken wordToken
 
 func (t subExprToken) isToken() {}
 
 func (t subExprToken) String() string { return wordToken(t).String() }
 
+func (t subExprToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+
 // The token describes one operator of an expression such as && or
-// hypot. A TCL_TOKEN_OPERATOR token is always preceded by a
-// TCL_TOKEN_SUB_EXPR token that describes the operator and its
-// operands; the TCL_TOKEN_SUB_EXPR token's numComponents field can be
-// used to determine the number of operands. A binary operator such as
-// * is followed by two TCL_TOKEN_SUB_EXPR tokens that describe its
-// operands. A unary operator like - is followed by a single
-// TCL_TOKEN_SUB_EXPR token for its operand. If the operator is a math
-// function such as log10, the TCL_TOKEN_OPERATOR token will give its
-// name and the following TCL_TOKEN_SUB_EXPR tokens will describe its
-// operands; if there are no operands (as with rand), no
-// TCL_TOKEN_SUB_EXPR tokens follow. There is one trinary operator, ?,
-// that appears in if-then-else subexpressions such as x?y:z; in this
-// case, the ? TCL_TOKEN_OPERATOR token is followed by three
-// TCL_TOKEN_SUB_EXPR tokens for the operands x, y, and z. The
-// numComponents field for a TCL_TOKEN_OPERATOR token is always 0.
+// hypot.
 type operatorToken textToken
 
 func (t operatorToken) isToken() {}
 
 func (t operatorToken) String() string { return textToken(t).String() }
+
+func (t operatorToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
