@@ -27,6 +27,95 @@ const (
 	SubstAll SubstType = SubstCommands | SubstVariables | SubstBackslashes
 )
 
+func ParseAllWhiteSpace(r []rune) ([]rune, int, error) {
+	return ParseWhiteSpaceAux(r, true)
+}
+
+func ParseWhiteSpace(r []rune) ([]rune, int, error) {
+	return ParseWhiteSpaceAux(r, false)
+}
+
+func ParseWhiteSpaceAux(r []rune, newlines bool) ([]rune, int, error) {
+	var (
+		idx int
+	)
+	for idx = 0; idx < len(r); idx++ {
+		var next rune
+		c := r[idx]
+		if idx < len(r)-1 {
+			next = r[idx+1]
+		}
+		if c == '\t' || c == '\v' || c == '\f' || c == '\r' || c == ' ' ||
+			(c == '\n' && newlines) ||
+			(c == '\\' && next == '\n') {
+			continue
+		}
+		if c == '\\' && next == '\n' {
+			_, size, err := ParseBackslashNewlineToken(r[idx:])
+			if err != nil {
+				return nil, 0, err
+			}
+			if size > 0 {
+				idx += size - 1
+			}
+			continue
+		}
+		break
+	}
+	return r[:idx], idx, nil
+}
+
+func ParseComment(r []rune) ([]rune, int, error) {
+	var (
+		idx int
+	)
+	for idx = 0; idx < len(r); idx++ {
+		_, size, err := ParseAllWhiteSpace(r[idx:])
+		if err != nil {
+			return nil, 0, err
+		}
+		if size > 0 {
+			idx += size
+		}
+		if r[idx] != '#' {
+			break
+		}
+		for ; idx < len(r); idx++ {
+			var next rune
+			c := r[idx]
+			if idx < len(r)-1 {
+				next = r[idx+1]
+			}
+			if c != '\\' {
+				if next == '\n' {
+					idx++
+					break
+				}
+			} else {
+				_, size, err := ParseWhiteSpace(r[idx:])
+				if err != nil {
+					return nil, 0, err
+				}
+				if size > 0 {
+					idx += size - 1
+				} else {
+					_, size, err := ParseBackslashToken(r[idx:])
+					if err != nil {
+						return nil, 0, err
+					}
+					if size > 0 {
+						idx += size - 1
+					}
+				}
+			}
+		}
+	}
+	if idx > len(r) {
+		idx = len(r)
+	}
+	return r[:idx], idx, nil
+}
+
 // words must only contain wordToken, simpleWordToken or
 // expandWordToken
 func ParseCommand(r []rune, nested bool) (words, int, error) {
@@ -35,7 +124,11 @@ func ParseCommand(r []rune, nested bool) (words, int, error) {
 		idx  int
 		prev rune
 	)
-	for idx = 0; idx < len(r); idx++ {
+	_, size, err := ParseComment(r)
+	if err != nil {
+		return nil, 0, err
+	}
+	for idx = size; idx < len(r); idx++ {
 		var next rune
 		c := r[idx]
 		if idx < len(r)-1 {
@@ -56,6 +149,7 @@ func ParseCommand(r []rune, nested bool) (words, int, error) {
 			if !nested && len(ws) == 0 {
 				continue
 			}
+			idx++
 			break
 		}
 		if nested && c == ']' {

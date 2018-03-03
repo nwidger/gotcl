@@ -106,10 +106,28 @@ if {$x == 23} \
   puts "hello $friend my $var(${name}) ${is} bob"
 `,
 		`
-set [set $name]($index) $::best::friend $ {*}[ my_cool_proc arg1 arg2 ]`,
+# blah blah
+# blah blah blah
+# blah
+set [set $name]($index) $::best::friend $ {*}[ my_cool_proc arg1 arg2 ]s`,
 	} {
 		ws, size, err := ParseCommand([]rune(str), false)
 		fmt.Println(size, err)
 		dumpWords(ws)
+	}
+}
+
+func TestParseComment(t *testing.T) {
+	for _, str := range []string{`# hello there`, `
+# hello there\
+ friend
+set x 123`, `
+# hello there
+# hello there
+# hello there
+
+set x 123`} {
+		r, size, err := ParseComment([]rune(str))
+		fmt.Printf("%v %v %v %q\n", string(r), size, err, str[size:])
 	}
 }
