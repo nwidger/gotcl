@@ -29,8 +29,8 @@ func runeSliceOfSlicesEqual(ra, rb [][]rune) bool {
 	return true
 }
 
-func dumpWords(ws words) {
-	for _, x := range ws {
+func dumpTokens(ts tokens) {
+	for _, x := range ts {
 		fmt.Println("======================================================================")
 		switch w := x.(type) {
 		case wordToken:
@@ -56,7 +56,7 @@ func dumpWords(ws words) {
 			fmt.Printf("  textToken %q\n", textToken(w))
 		case expandWordToken:
 			fmt.Printf("expandWordToken %q\n", w)
-			switch u := w.word.(type) {
+			switch u := w.token.(type) {
 			case wordToken:
 				fmt.Printf("  wordToken %q\n", u)
 				for _, y := range u {
@@ -112,7 +112,7 @@ set [set $name]($index) $::best::friend $ {*}[ my_cool_proc arg1 arg2 ]s`,
 	} {
 		ws, size, err := ParseCommand([]rune(str), false)
 		fmt.Println(size, err)
-		dumpWords(ws)
+		dumpTokens(ws)
 	}
 }
 
@@ -162,7 +162,34 @@ if {1} {
 				idx += size - 1
 			}
 			fmt.Println(size, err)
-			dumpWords(ws)
+			dumpTokens(ws)
+		}
+	}
+}
+
+func TestSubstTokens(t *testing.T) {
+	for _, str := range []string{
+		`
+# blah blah blah
+# blah blah
+puts "stdout hello $there \
+           to you too" { this is \
+                         a brace token }
+`,
+	} {
+		fmt.Println("======================================================================")
+		ts, size, err := ParseCommand([]rune(str), false)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println(size, err)
+		dumpTokens(ts)
+		for i := 0; i < len(ts); i++ {
+			s, err := SubstTokens(ts[i], SubstAll)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Printf("%q\n", s)
 		}
 	}
 }

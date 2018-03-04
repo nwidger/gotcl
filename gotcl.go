@@ -115,8 +115,8 @@ func ParseComment(r []rune) ([]rune, int, error) {
 
 // words must only contain wordToken, simpleWordToken or
 // expandWordToken
-func ParseCommand(r []rune, nested bool) (words, int, error) {
-	ws := words{}
+func ParseCommand(r []rune, nested bool) (tokens, int, error) {
+	ts := tokens{}
 	var (
 		idx  int
 		prev rune
@@ -143,7 +143,7 @@ func ParseCommand(r []rune, nested bool) (words, int, error) {
 			continue
 		}
 		if prev != '\\' && (c == ';' || c == '\n') {
-			if !nested && len(ws) == 0 {
+			if !nested && len(ts) == 0 {
 				continue
 			}
 			idx++
@@ -163,13 +163,13 @@ func ParseCommand(r []rune, nested bool) (words, int, error) {
 		if size > 0 {
 			idx += size - 1
 		}
-		ws = append(ws, w)
+		ts = append(ts, w)
 		prev = r[idx]
 	}
-	return ws, idx, nil
+	return ts, idx, nil
 }
 
-func ParseWord(r []rune, nested bool) (word, int, error) {
+func ParseWord(r []rune, nested bool) (token, int, error) {
 	if len(r) == 0 {
 		return simpleWordToken(r), 0, nil
 	}
@@ -214,18 +214,18 @@ func ParseWord(r []rune, nested bool) (word, int, error) {
 		return nil, 0, err
 	}
 
-	var w word
-	w = wordToken(ts)
+	var tok token
+	tok = wordToken(ts)
 	if len(ts) == 1 {
 		if text, ok := ts[0].(textToken); ok {
-			w = simpleWordToken(text)
+			tok = simpleWordToken(text)
 		}
 	}
 
 	if argumentExpansion {
-		return expandWordToken{w}, size + 3, nil
+		return expandWordToken{tok}, size + 3, nil
 	}
-	return w, size, nil
+	return tok, size, nil
 }
 
 func ParseTextToken(r []rune, terminators TermType) (token, int, error) {
@@ -273,7 +273,7 @@ outerLoop:
 // variable substitution, and backslash substitution are performed on
 // the characters between the quotes as described below. The
 // double-quotes are not retained as part of the word.
-func ParseQuotedStringWord(r []rune, nested bool) (word, int, error) {
+func ParseQuotedStringWord(r []rune, nested bool) (token, int, error) {
 	if len(r) == 0 || r[0] != '"' {
 		return nil, 0, fmt.Errorf("word does not start with double-quote")
 	}
@@ -308,15 +308,15 @@ func ParseQuotedStringWord(r []rune, nested bool) (word, int, error) {
 	}
 
 	size := idx + 1
-	ws, err := ParseQuotedStringTokens(simpleWordToken(r[:idx+1]), nested)
+	tok, err := ParseQuotedStringTokens(simpleWordToken(r[:idx+1]), nested)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	return ws, size, nil
+	return tok, size, nil
 }
 
-func ParseQuotedStringTokens(r simpleWordToken, nested bool) (word, error) {
+func ParseQuotedStringTokens(r simpleWordToken, nested bool) (token, error) {
 	if len(r) == 0 || r[0] != '"' {
 		return nil, fmt.Errorf("word does not start with double-quote")
 	}
@@ -341,7 +341,7 @@ func ParseQuotedStringTokens(r simpleWordToken, nested bool) (word, error) {
 // receive any special interpretation. The word will consist of
 // exactly the characters between the outer braces, not including the
 // braces themselves.
-func ParseBracesWord(r []rune, nested bool) (word, int, error) {
+func ParseBracesWord(r []rune, nested bool) (token, int, error) {
 	if len(r) == 0 || r[0] != '{' {
 		return nil, 0, fmt.Errorf("word does not start with open brace")
 	}
@@ -378,15 +378,15 @@ func ParseBracesWord(r []rune, nested bool) (word, int, error) {
 	}
 
 	size := idx + 1
-	ws, err := ParseBracesTokens(simpleWordToken(r[:idx+1]), nested)
+	tok, err := ParseBracesTokens(simpleWordToken(r[:idx+1]), nested)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	return ws, size, nil
+	return tok, size, nil
 }
 
-func ParseBracesTokens(r simpleWordToken, nested bool) (word, error) {
+func ParseBracesTokens(r simpleWordToken, nested bool) (token, error) {
 	var (
 		start int
 		end   int
@@ -396,28 +396,28 @@ func ParseBracesTokens(r simpleWordToken, nested bool) (word, error) {
 		return nil, fmt.Errorf("word does not start with open brace")
 	}
 
-	ws := wordToken{}
+	ts := wordToken{}
 
 	for start, end = 1, 1; end < len(r)-1; end++ {
 		c := r[end]
 		if c == '\\' && end+1 < len(r)-1 && r[end+1] == '\n' {
 			if end != start {
-				ws = append(ws, textToken(r[start:end]))
+				ts = append(ts, textToken(r[start:end]))
 			}
 			tok, size, err := ParseBackslashNewlineToken(r[end:])
 			if err != nil {
 				return nil, err
 			}
-			ws = append(ws, tok)
+			ts = append(ts, tok)
 			end += size
 			start = end
 		}
 	}
 	if end != start {
-		ws = append(ws, textToken(r[start:end]))
+		ts = append(ts, textToken(r[start:end]))
 	}
 
-	return ws, nil
+	return ts, nil
 }
 
 func ParseTokens(r []rune, terminators TermType, substs SubstType) (tokens, int, error) {
@@ -806,22 +806,15 @@ func ParseBackslashToken(r []rune) (token, int, error) {
 	return bsToken(r[:2]), 2, nil
 }
 
-func SubstTokens(ts tokens, substs SubstType) (string, error) {
-	var b strings.Builder
-	for i := 0; i < len(ts); i++ {
-		s, err := ts[i].Subst(substs)
-		if err != nil {
-			return "", err
-		}
-		_, err = b.WriteString(s)
-		if err != nil {
-			return "", err
-		}
+func SubstTokens(tok token, substs SubstType) (string, error) {
+	s, err := tok.Subst(substs)
+	if err != nil {
+		return "", err
 	}
-	return b.String(), nil
+	return s, nil
 }
 
-func SubstBackslashToken(r bsToken) (token, error) {
+func SubstBackslashToken(r []rune) (token, error) {
 	if len(r) < 2 || r[0] != '\\' {
 		return nil, fmt.Errorf("must be characters and start with backslash")
 	}
@@ -875,9 +868,9 @@ func SubstBackslashToken(r bsToken) (token, error) {
 }
 
 var (
-	_ word = wordToken{}
-	_ word = simpleWordToken{}
-	_ word = expandWordToken{}
+	_ token = wordToken{}
+	_ token = simpleWordToken{}
+	_ token = expandWordToken{}
 
 	_ token = textToken{}
 	_ token = bsToken{}
@@ -888,99 +881,29 @@ var (
 	_ token = operatorToken{}
 )
 
-type word interface {
-	token
-
-	isWord()
-}
-
-type words []word
-
-func (ws words) String() string {
-	var b strings.Builder
-	for i := 0; i < len(ws); i++ {
-		_, err := b.WriteString(ws[i].String())
-		if err != nil {
-			return ""
-		}
-	}
-	return b.String()
-}
-
-func (ws words) Subst(substs SubstType) (string, error) {
-	var b strings.Builder
-	for i := 0; i < len(ws); i++ {
-		w := ws[i]
-		s, err := w.Subst(substs)
-		if err != nil {
-			return "", err
-		}
-		_, err = b.WriteString(s)
-		if err != nil {
-			return "", err
-		}
-
-	}
-	return b.String(), nil
-}
-
 // This token ordinarily describes one word of a command but it may
 // also describe a quoted or braced string in an expression.
 type wordToken tokens
 
-func (_ wordToken) isWord() {}
+func (w wordToken) String() string { return tokens(w).String() }
 
-func (w wordToken) String() string {
-	var b strings.Builder
-	for i := 0; i < len(w); i++ {
-		_, err := b.WriteString(w[i].String())
-		if err != nil {
-			return ""
-		}
-	}
-	return b.String()
-}
-
-func (w wordToken) Subst(substs SubstType) (string, error) {
-	var b strings.Builder
-	for i := 0; i < len(w); i++ {
-		tok := w[i]
-		s, err := tok.Subst(substs)
-		if err != nil {
-			return "", err
-		}
-		_, err = b.WriteString(s)
-		if err != nil {
-			return "", err
-		}
-
-	}
-	return b.String(), nil
-}
+func (w wordToken) Subst(substs SubstType) (string, error) { return tokens(w).Subst(substs) }
 
 // This token has the same meaning as wordToken, except that the word
 // is guaranteed to consist of a single textToken sub-token.
 type simpleWordToken textToken
 
-func (_ simpleWordToken) isWord() {}
-
 func (w simpleWordToken) String() string { return string(w) }
 
-func (w simpleWordToken) Subst(substs SubstType) (string, error) {
-	s, err := textToken(w).Subst(substs)
-	if err != nil {
-		return "", err
-	}
-	return s, nil
-}
+func (w simpleWordToken) Subst(substs SubstType) (string, error) { return textToken(w).Subst(substs) }
 
 // This token has the same meaning as wordToken, except that the
 // command parser notes this word began with the expansion prefix {*}.
 type expandWordToken struct {
-	word
+	token
 }
 
-func (w expandWordToken) String() string { return "{*}" + w.word.String() }
+func (w expandWordToken) String() string { return "{*}" + w.token.String() }
 
 type token interface {
 	fmt.Stringer
@@ -1050,7 +973,7 @@ func (t commandToken) Subst(substs SubstType) (string, error) { return t.String(
 type variableToken tokens
 
 func (t variableToken) String() string {
-	if len(t) == 0 {
+	if t == nil || len(t) == 0 {
 		return ""
 	}
 	return t[0].String()
