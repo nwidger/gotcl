@@ -386,7 +386,6 @@ func ParseBracesWord(r []rune, nested bool) (word, int, error) {
 	return ws, size, nil
 }
 
-// must be '{' text '}'
 func ParseBracesTokens(r simpleWordToken, nested bool) (word, error) {
 	var (
 		start int
@@ -807,6 +806,21 @@ func ParseBackslashToken(r []rune) (token, int, error) {
 	return bsToken(r[:2]), 2, nil
 }
 
+func SubstTokens(ts tokens, substs SubstType) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(ts); i++ {
+		s, err := ts[i].Subst(substs)
+		if err != nil {
+			return "", err
+		}
+		_, err = b.WriteString(s)
+		if err != nil {
+			return "", err
+		}
+	}
+	return b.String(), nil
+}
+
 func SubstBackslashToken(r bsToken) (token, error) {
 	if len(r) < 2 || r[0] != '\\' {
 		return nil, fmt.Errorf("must be characters and start with backslash")
@@ -875,9 +889,9 @@ var (
 )
 
 type word interface {
-	fmt.Stringer
+	token
+
 	isWord()
-	Subst(substs SubstType) (string, error)
 }
 
 type words []word
@@ -970,7 +984,6 @@ func (w expandWordToken) String() string { return "{*}" + w.word.String() }
 
 type token interface {
 	fmt.Stringer
-	isToken()
 	Subst(substs SubstType) (string, error)
 }
 
@@ -1006,16 +1019,12 @@ func (ts tokens) Subst(substs SubstType) (string, error) {
 // The token describes a range of literal text that is part of a word.
 type textToken []rune
 
-func (t textToken) isToken() {}
-
 func (t textToken) String() string { return string(t) }
 
 func (t textToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
 
 // The token describes a backslash sequence such as \n or \0xa3.
 type bsToken textToken
-
-func (t bsToken) isToken() {}
 
 func (t bsToken) String() string { return string(t) }
 
@@ -1031,8 +1040,6 @@ func (t bsToken) Subst(substs SubstType) (string, error) {
 // the word.
 type commandToken textToken
 
-func (t commandToken) isToken() {}
-
 func (t commandToken) String() string { return string(t) }
 
 func (t commandToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
@@ -1040,9 +1047,7 @@ func (t commandToken) Subst(substs SubstType) (string, error) { return t.String(
 // The token describes a variable substitution, including the $,
 // variable name, and array index (if there is one) up through the
 // close parenthesis that terminates the index.
-type variableToken []token
-
-func (t variableToken) isToken() {}
+type variableToken tokens
 
 func (t variableToken) String() string {
 	if len(t) == 0 {
@@ -1057,8 +1062,6 @@ func (t variableToken) Subst(substs SubstType) (string, error) { return t.String
 // entire expression).
 type subExprToken wordToken
 
-func (t subExprToken) isToken() {}
-
 func (t subExprToken) String() string { return wordToken(t).String() }
 
 func (t subExprToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
@@ -1066,8 +1069,6 @@ func (t subExprToken) Subst(substs SubstType) (string, error) { return t.String(
 // The token describes one operator of an expression such as && or
 // hypot.
 type operatorToken textToken
-
-func (t operatorToken) isToken() {}
 
 func (t operatorToken) String() string { return textToken(t).String() }
 
