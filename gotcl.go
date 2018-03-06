@@ -952,6 +952,9 @@ type bsToken textToken
 func (t bsToken) String() string { return string(t) }
 
 func (t bsToken) Subst(substs SubstType) (string, error) {
+	if (SubstBackslashes & substs) == 0 {
+		return t.String(), nil
+	}
 	tok, err := SubstBackslashToken(t)
 	if err != nil {
 		return "", err
