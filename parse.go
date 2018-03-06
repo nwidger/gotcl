@@ -806,8 +806,8 @@ func ParseBackslashToken(r []rune) (token, int, error) {
 	return bsToken(r[:2]), 2, nil
 }
 
-func SubstTokens(tok token, substs SubstType) (string, error) {
-	s, err := tok.Subst(substs)
+func SubstTokens(interp *Interp, substs SubstType, tok token) (string, error) {
+	s, err := tok.Subst(interp, substs)
 	if err != nil {
 		return "", err
 	}
@@ -887,7 +887,9 @@ type wordToken tokens
 
 func (w wordToken) String() string { return tokens(w).String() }
 
-func (w wordToken) Subst(substs SubstType) (string, error) { return tokens(w).Subst(substs) }
+func (w wordToken) Subst(interp *Interp, substs SubstType) (string, error) {
+	return tokens(w).Subst(interp, substs)
+}
 
 // This token has the same meaning as wordToken, except that the word
 // is guaranteed to consist of a single textToken sub-token.
@@ -895,7 +897,9 @@ type simpleWordToken textToken
 
 func (w simpleWordToken) String() string { return string(w) }
 
-func (w simpleWordToken) Subst(substs SubstType) (string, error) { return textToken(w).Subst(substs) }
+func (w simpleWordToken) Subst(interp *Interp, substs SubstType) (string, error) {
+	return textToken(w).Subst(interp, substs)
+}
 
 // This token has the same meaning as wordToken, except that the
 // command parser notes this word began with the expansion prefix {*}.
@@ -907,12 +911,15 @@ func (w expandWordToken) String() string { return "{*}" + w.token.String() }
 
 type token interface {
 	fmt.Stringer
-	Subst(substs SubstType) (string, error)
+	Subst(interp *Interp, substs SubstType) (string, error)
 }
 
 type tokens []token
 
 func (ts tokens) String() string {
+	if ts == nil || len(ts) == 0 {
+		return ""
+	}
 	var b strings.Builder
 	for i := 0; i < len(ts); i++ {
 		_, err := b.WriteString(ts[i].String())
@@ -923,11 +930,11 @@ func (ts tokens) String() string {
 	return b.String()
 }
 
-func (ts tokens) Subst(substs SubstType) (string, error) {
+func (ts tokens) Subst(interp *Interp, substs SubstType) (string, error) {
 	var b strings.Builder
 	for i := 0; i < len(ts); i++ {
 		tok := ts[i]
-		s, err := tok.Subst(substs)
+		s, err := tok.Subst(interp, substs)
 		if err != nil {
 			return "", err
 		}
@@ -942,16 +949,21 @@ func (ts tokens) Subst(substs SubstType) (string, error) {
 // The token describes a range of literal text that is part of a word.
 type textToken []rune
 
-func (t textToken) String() string { return string(t) }
+func (t textToken) String() string {
+	if t == nil || len(t) == 0 {
+		return ""
+	}
+	return string(t)
+}
 
-func (t textToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+func (t textToken) Subst(interp *Interp, substs SubstType) (string, error) { return t.String(), nil }
 
 // The token describes a backslash sequence such as \n or \0xa3.
 type bsToken textToken
 
-func (t bsToken) String() string { return string(t) }
+func (t bsToken) String() string { return textToken(t).String() }
 
-func (t bsToken) Subst(substs SubstType) (string, error) {
+func (t bsToken) Subst(interp *Interp, substs SubstType) (string, error) {
 	if (SubstBackslashes & substs) == 0 {
 		return t.String(), nil
 	}
@@ -966,9 +978,16 @@ func (t bsToken) Subst(substs SubstType) (string, error) {
 // the word.
 type commandToken textToken
 
-func (t commandToken) String() string { return string(t) }
+func (t commandToken) String() string { return textToken(t).String() }
 
-func (t commandToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+func (t commandToken) Subst(interp *Interp, substs SubstType) (string, error) {
+	if (SubstCommands & substs) == 0 {
+		return t.String(), nil
+	}
+	s := t.String()
+	script := s[1 : len(s)-1]
+	return interp.Eval(script)
+}
 
 // The token describes a variable substitution, including the $,
 // variable name, and array index (if there is one) up through the
@@ -982,7 +1001,31 @@ func (t variableToken) String() string {
 	return t[0].String()
 }
 
-func (t variableToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+func (t variableToken) Subst(interp *Interp, substs SubstType) (string, error) {
+	if (SubstVariables & substs) == 0 {
+		return t.String(), nil
+	}
+	if len(t) < 2 {
+		return "", nil
+	}
+	name := t[1].String()
+	if len(t) == 2 {
+		return interp.GetVar(name, "")
+	}
+	var b strings.Builder
+	for i := 2; i < len(t); i++ {
+		s, err := t[i].Subst(interp, substs)
+		if err != nil {
+			return "", err
+		}
+		_, err = b.WriteString(s)
+		if err != nil {
+			return "", err
+		}
+	}
+	index := b.String()
+	return interp.GetVar(name, index)
+}
 
 // The token describes one subexpression of an expression (or an
 // entire expression).
@@ -990,7 +1033,7 @@ type subExprToken wordToken
 
 func (t subExprToken) String() string { return wordToken(t).String() }
 
-func (t subExprToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+func (t subExprToken) Subst(interp *Interp, substs SubstType) (string, error) { return t.String(), nil }
 
 // The token describes one operator of an expression such as && or
 // hypot.
@@ -998,4 +1041,4 @@ type operatorToken textToken
 
 func (t operatorToken) String() string { return textToken(t).String() }
 
-func (t operatorToken) Subst(substs SubstType) (string, error) { return t.String(), nil }
+func (t operatorToken) Subst(interp *Interp, substs SubstType) (string, error) { return t.String(), nil }

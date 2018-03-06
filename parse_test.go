@@ -185,11 +185,33 @@ puts "stdout hello $there \
 		fmt.Println(size, err)
 		dumpTokens(ts)
 		for i := 0; i < len(ts); i++ {
-			s, err := SubstTokens(ts[i], SubstAll)
+			s, err := SubstTokens(nil, SubstAll, ts[i])
 			if err != nil {
 				fmt.Println(err)
 			}
 			fmt.Printf("%q\n", s)
 		}
+	}
+}
+
+func TestEval(t *testing.T) {
+	interp := NewInterp()
+
+	for _, str := range []string{
+		`
+# blah blah blah
+# blah blah
+puts "stdout [ blah blah blah ] hello $there(is${a}way$out) \
+           to you too" { this is \
+                         a brace token }
+`,
+	} {
+		fmt.Println("======================================================================")
+		fmt.Println(str)
+		s, err := interp.Eval(str)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println(s, err)
 	}
 }
