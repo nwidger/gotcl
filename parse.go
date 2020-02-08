@@ -867,6 +867,131 @@ func SubstBackslashToken(r []rune) (token, error) {
 	return textToken([]rune{rune(val)}), nil
 }
 
+func ParseExpr(r []rune) (token, int, error) {
+	for idx := 0; idx < len(r); idx++ {
+		_, size, err := ParseAllWhiteSpace(r[idx:])
+		if err != nil {
+			return nil, 0, err
+		}
+		idx += size
+	}
+	return nil, 0, nil
+}
+
+// END, EXPON, MULT, EQUAL, INCOMPLETE, NEQ, NOT, AND, BIT_AND, OR,
+// BIT_OR, LEFT_SHIFT, LEQ, LESS, RIGHT_SHIFT, GEQ, GREATER, IN_LIST,
+// STREQ, STRNEQ, NOT_IN_LIST, NUMBER, INVALID, BAREWORD
+func ParseLexeme(r []rune) (token, int, error) {
+	if len(r) == 0 {
+		return subExprToken{}, 0, nil
+	}
+
+	var (
+		second, third rune
+	)
+	first := r[0]
+	if len(r) > 1 {
+		second = r[1]
+	}
+	if len(r) > 2 {
+		second = r[2]
+	}
+
+	switch first {
+	case '*':
+		size := 1
+		if second == '*' {
+			// EXPON
+			size++
+		}
+		// MULT
+		return textToken(r[:size]), size, nil
+	case '=':
+		size := 1
+		if second == '=' {
+			// EQUAL
+			size++
+			return textToken(r[:size]), size, nil
+		}
+		return nil, size, fmt.Errorf(`incomplete operator "="`)
+	case '!':
+		size := 1
+		if second == '=' {
+			// NEQ
+			size++
+		}
+		// NOT
+		return textToken(r[:size]), size, nil
+	case '&':
+		size := 1
+		if second == '&' {
+			// AND
+			size++
+		}
+		// BIT_AND
+		return textToken(r[:size]), size, nil
+	case '|':
+		size := 1
+		if second == '|' {
+			// OR
+			size++
+		}
+		// BIT_OR
+		return textToken(r[:size]), size, nil
+	case '<':
+		size := 1
+		switch second {
+		case '<':
+			// LEFT_SHIFT
+			size++
+		case '=':
+			// LEQ
+			size++
+		}
+		// LESS
+		return textToken(r[:size]), size, nil
+	case '>':
+		size := 1
+		switch second {
+		case '<':
+			// RIGHT_SHIFT
+			size++
+		case '=':
+			// GEQ
+			size++
+		}
+		// GREATER
+		return textToken(r[:size]), size, nil
+	case 'i':
+		if second == 'n' && (third&unicode.MaxASCII) != 0 || !unicode.IsLetter(third) {
+			// IN_LIST
+			size := 2
+			return textToken(r[:size]), size, nil
+		}
+	case 'e':
+		if second == 'q' && (third&unicode.MaxASCII) != 0 || !unicode.IsLetter(third) {
+			// STREQ
+			size := 2
+			return textToken(r[:size]), size, nil
+		}
+	case 'n':
+		if (third&unicode.MaxASCII) != 0 || !unicode.IsLetter(third) {
+			switch second {
+			case 'e':
+				// STRNEQ
+				size := 2
+				return textToken(r[:size]), size, nil
+			case 'i':
+				// NOT_IN_LIST
+				size := 2
+				return textToken(r[:size]), size, nil
+			}
+		}
+	}
+
+	return nil, 0, nil
+}
+
 var (
 	_ token = wordToken{}
 	_ token = simpleWordToken{}
@@ -1010,7 +1135,7 @@ func (t variableToken) Subst(interp *Interp, substs SubstType) (string, error) {
 	}
 	name := t[1].String()
 	if len(t) == 2 {
-		return interp.GetVar(name, "")
+		return interp.GetVar(name)
 	}
 	var b strings.Builder
 	for i := 2; i < len(t); i++ {
@@ -1024,7 +1149,7 @@ func (t variableToken) Subst(interp *Interp, substs SubstType) (string, error) {
 		}
 	}
 	index := b.String()
-	return interp.GetVar(name, index)
+	return interp.GetVar2(name, index)
 }
 
 // The token describes one subexpression of an expression (or an

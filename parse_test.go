@@ -201,13 +201,11 @@ func TestEval(t *testing.T) {
 		`
 # blah blah blah
 # blah blah
-puts "stdout [ blah blah blah ] hello $there(is${a}way$out) \
-           to you too" { this is \
-                         a brace token }
+set n bob
+puts "my name is [ set n ], yes that's right, ${n}"
 `,
 	} {
 		fmt.Println("======================================================================")
-		fmt.Println(str)
 		s, err := interp.Eval(str)
 		if err != nil {
 			fmt.Println(err)
